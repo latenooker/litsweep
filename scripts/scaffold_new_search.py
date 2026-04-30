@@ -665,7 +665,10 @@ def main(argv: list[str] | None = None) -> int:
             "import vocab as vocab_mod", text)
         text = re.sub(r"import minerals as minerals_mod",
                       "import vocab as vocab_mod", text)
-        text = text.replace("minerals_mod.", "vocab_mod.")
+        # Body references: `minerals_mod.attr` AND bare references like
+        # `getattr(minerals_mod, ...)`. Use word-boundary regex to catch
+        # both without clobbering substrings inside strings/comments.
+        text = re.sub(r"\bminerals_mod\b", "vocab_mod", text)
         # Replace the (topic-specific) module docstring with a generic
         # placeholder so `python <slug>_search.py --help` doesn't
         # mislead users into thinking the new project's scope is
