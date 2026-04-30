@@ -40,6 +40,10 @@ SOURCE_QUERIES: dict[str, list[str]] = {
     "base": Q.BASE,
     "bdtd": Q.BDTD,
     "scielo": getattr(Q, "SCIELO", []),
+    "europepmc": getattr(Q, "EUROPEPMC", []),
+    "eartharxiv": getattr(Q, "EARTHARXIV", []),
+    "crossref": getattr(Q, "CROSSREF", []),
+    "core": getattr(Q, "CORE", []),
 }
 
 # Defaults exclude the Starter-tier WoS endpoint (wos) and BASE because both
@@ -49,6 +53,7 @@ SOURCE_QUERIES: dict[str, list[str]] = {
 DEFAULT_SOURCES: tuple[str, ...] = (
     "openalex", "semantic_scholar", "wos_expanded",
     "hal", "theses_fr", "bdtd", "scielo",
+    "europepmc", "eartharxiv", "crossref", "core",
 )
 
 
@@ -363,6 +368,7 @@ def _build_config(args: argparse.Namespace) -> api_clients.ClientConfig:
         wos_key=os.environ.get("WOS_API_KEY"),
         wos_expanded_key=os.environ.get("WOS_EXPANDED_API_KEY"),
         base_key=os.environ.get("BASE_API_KEY"),
+        core_key=os.environ.get("CORE_API_KEY"),
     )
 
 

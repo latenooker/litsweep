@@ -405,10 +405,54 @@ BDTD: list[str] = [
 # ---------------------------------------------------------------------------
 # SciELO — Latin-American + Iberian aggregator. Public HTML search.
 # Spanish + Portuguese strings work best here; English strings work too.
+# AND-of-tokens search, so keep queries short (2-3 tokens).
 # ---------------------------------------------------------------------------
 
 SCIELO: list[str] = [
     # TODO: 4-8 short Spanish / Portuguese keyword strings.
+]
+
+# ---------------------------------------------------------------------------
+# Europe PMC — covers PubMed/MEDLINE/PMC plus preprints (bioRxiv,
+# medRxiv, Research Square, SSRN, ESSOAr) under SRC:PPR. The default
+# orchestrator wiring filters to preprints only to avoid re-pulling
+# papers OpenAlex already has.
+# ---------------------------------------------------------------------------
+
+EUROPEPMC: list[str] = [
+    # TODO: 4-8 English keyword strings; Europe PMC supports
+    # (term1 OR term2) and AND/OR operators.
+]
+
+# ---------------------------------------------------------------------------
+# EarthArXiv — Earth-science preprint repo. Their site search is
+# broken; we route through Crossref filtered to prefix:10.31223.
+# ---------------------------------------------------------------------------
+
+EARTHARXIV: list[str] = [
+    # TODO: 3-6 short English keyword strings.
+]
+
+# ---------------------------------------------------------------------------
+# Crossref — broad DOI registry. Heavy overlap with OpenAlex/Semantic
+# Scholar (dedup handles it); the unique value is regional
+# institutional-repository DOIs, JSTOR, Cambridge journals, etc.
+# ---------------------------------------------------------------------------
+
+CROSSREF: list[str] = [
+    # TODO: 4-8 English keyword strings (multilingual works too,
+    # Crossref indexes multilingual titles).
+]
+
+# ---------------------------------------------------------------------------
+# CORE.ac.uk — full-text aggregator that explicitly indexes university
+# institutional repositories. Catches academia.edu / dspace / JSTOR-
+# hosted gray literature. Anonymous tier works; export CORE_API_KEY
+# in your shell for higher-volume access.
+# ---------------------------------------------------------------------------
+
+CORE: list[str] = [
+    # TODO: 4-8 English keyword strings.
 ]
 '''
     (target / "queries.py").write_text(content, encoding="utf-8")

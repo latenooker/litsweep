@@ -102,6 +102,7 @@ class ClientConfig:
     wos_key: str | None = None
     wos_expanded_key: str | None = None
     base_key: str | None = None
+    core_key: str | None = None  # CORE.ac.uk; anonymous tier works for moderate use
     per_query_cap: int = 500
 
     def log_error(self, source: str, query: str, msg: str) -> None:
@@ -922,6 +923,352 @@ def search_scielo(queries: Iterable[str], cfg: ClientConfig) -> list[dict[str, A
 
 
 # ---------------------------------------------------------------------------
+# Europe PMC — covers MEDLINE, PMC, and (filtered) preprint repos
+# (bioRxiv, medRxiv, Research Square, SSRN, Authorea/ESSOAr, etc.).
+# Public REST API, no key. Default in DEFAULT_SOURCES uses the
+# PPR-only filter because PubMed/PMC overlap with OpenAlex; projects
+# that want a fuller Europe PMC pull can call this client directly.
+# ---------------------------------------------------------------------------
+
+
+def _strip_html(s: str) -> str:
+    """Strip simple inline HTML wrappers (<title>, <p>, etc.) from an
+    abstract string. Europe PMC preprint abstracts arrive as JATS-ish
+    fragments like '<title>Abstract</title> <p>The ...</p>'."""
+    if not s:
+        return ""
+    # Cheap: drop anything between <...>
+    out, depth = [], 0
+    for ch in s:
+        if ch == "<":
+            depth += 1
+            continue
+        if ch == ">":
+            depth = max(0, depth - 1)
+            continue
+        if depth == 0:
+            out.append(ch)
+    return " ".join("".join(out).split())
+
+
+def search_europepmc(
+    queries: Iterable[str],
+    cfg: ClientConfig,
+    *,
+    only_preprints: bool = True,
+    page_size: int = 100,
+) -> list[dict[str, Any]]:
+    """Search Europe PMC.
+
+    By default narrows to preprints (``SRC:PPR``) since PubMed/PMC
+    coverage already overlaps OpenAlex. Set ``only_preprints=False`` to
+    pull the full index (useful for biomedical projects).
+    """
+    out: list[dict[str, Any]] = []
+    base = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+    for q in queries:
+        full = f"({q}) AND SRC:PPR" if only_preprints else q
+        params = {
+            "query": full,
+            "format": "json",
+            "pageSize": page_size,
+            "resultType": "core",
+        }
+        resp = _request_with_retry("GET", base, params=params, headers=None)
+        if resp is None or not resp.ok:
+            cfg.log_error("europepmc", q,
+                          f"status={getattr(resp, 'status_code', 'NA')}")
+            time.sleep(0.5)
+            continue
+        try:
+            data = resp.json()
+        except Exception as exc:
+            cfg.log_error("europepmc", q, f"json={exc}")
+            continue
+        cfg.dump_raw("europepmc", q, data)
+        for r in (data.get("resultList") or {}).get("result") or []:
+            doi = r.get("doi")
+            full_text_urls: list[str] = []
+            for u in (r.get("fullTextUrlList") or {}).get("fullTextUrl") or []:
+                if u.get("url"):
+                    full_text_urls.append(u["url"])
+            url = full_text_urls[0] if full_text_urls else (
+                f"https://doi.org/{doi}" if doi else None
+            )
+            year = None
+            if r.get("pubYear"):
+                try:
+                    year = int(r["pubYear"])
+                except (TypeError, ValueError):
+                    year = None
+            abstract = _strip_html(r.get("abstractText") or "")
+            out.append({
+                "id": f"epmc:{r.get('source','PPR')}:{r.get('id') or doi}",
+                "doi": doi,
+                "title": r.get("title"),
+                "publication_year": year,
+                "language": None,  # EPMC doesn't reliably return language
+                "type": (r.get("pubTypeList") or {}).get("pubType", [""])[0]
+                        if isinstance((r.get("pubTypeList") or {}).get("pubType"), list)
+                        else None,
+                "abstract": abstract or None,
+                "authors": r.get("authorString"),
+                "source_journal_or_publisher":
+                    r.get("journalTitle")
+                    or (r.get("bookOrReportDetails") or {}).get("publisher")
+                    or "Europe PMC",
+                "cited_by_count": r.get("citedByCount"),
+                "open_access_url": url,
+                "raw": json.dumps(r)[:5000],
+                "source_database": "europepmc",
+            })
+        time.sleep(0.3)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# EarthArXiv — Earth-science preprint repo. Their site search ignores
+# query parameters, but the DOI prefix 10.31223 is registered with
+# Crossref so we use the Crossref Works API filtered to that prefix.
+# ---------------------------------------------------------------------------
+
+
+def search_eartharxiv(
+    queries: Iterable[str],
+    cfg: ClientConfig,
+    *,
+    rows: int = 50,
+) -> list[dict[str, Any]]:
+    """Search EarthArXiv via Crossref's prefix filter.
+
+    EarthArXiv's own /repository/search endpoint ignores query
+    parameters (verified on 2026-04-30), so we hit the Crossref Works
+    API with ``filter=prefix:10.31223,type:posted-content`` instead.
+    Crossref's response includes title, DOI, and (sometimes) abstract.
+    """
+    out: list[dict[str, Any]] = []
+    base = "https://api.crossref.org/works"
+    headers = {
+        "User-Agent": (
+            f"litsweep/0.1 (mailto:{cfg.email or 'noreply@example.com'}; "
+            "research literature search)"
+        ),
+    }
+    for q in queries:
+        params = {
+            "query": q,
+            "filter": "prefix:10.31223,type:posted-content",
+            "rows": rows,
+            "select": "DOI,title,abstract,author,published,subject,URL,publisher,type,language",
+        }
+        resp = _request_with_retry("GET", base, params=params, headers=headers)
+        if resp is None or not resp.ok:
+            cfg.log_error("eartharxiv", q,
+                          f"status={getattr(resp, 'status_code', 'NA')}")
+            time.sleep(0.5)
+            continue
+        try:
+            data = resp.json()
+        except Exception as exc:
+            cfg.log_error("eartharxiv", q, f"json={exc}")
+            continue
+        cfg.dump_raw("eartharxiv", q, data)
+        for r in (data.get("message") or {}).get("items") or []:
+            doi = r.get("DOI")
+            title_list = r.get("title") or []
+            title = title_list[0] if title_list else None
+            abstract = _strip_html(r.get("abstract") or "")
+            authors = "; ".join(
+                f"{a.get('family','')}, {a.get('given','')}".strip(", ")
+                for a in (r.get("author") or [])
+            )
+            published = r.get("published") or {}
+            year = None
+            dp = published.get("date-parts")
+            if isinstance(dp, list) and dp and isinstance(dp[0], list) and dp[0]:
+                year = dp[0][0]
+            url = (r.get("URL") or
+                   (f"https://doi.org/{doi}" if doi else None))
+            out.append({
+                "id": f"eartharxiv:{doi}" if doi else f"eartharxiv:{title[:80] if title else 'unknown'}",
+                "doi": doi,
+                "title": title,
+                "publication_year": year,
+                "language": r.get("language"),
+                "type": "preprint",
+                "abstract": abstract or None,
+                "authors": authors,
+                "source_journal_or_publisher": r.get("publisher") or "EarthArXiv",
+                "cited_by_count": None,
+                "open_access_url": url,
+                "raw": json.dumps(r)[:5000],
+                "source_database": "eartharxiv",
+            })
+        time.sleep(0.3)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Crossref — broad DOI registry. Higher recall than OpenAlex on
+# JSTOR/Cambridge journal-hosted Latin American / Spanish-language
+# archaeology and similar regional venues. No key required.
+# ---------------------------------------------------------------------------
+
+
+def search_crossref(
+    queries: Iterable[str],
+    cfg: ClientConfig,
+    *,
+    rows: int = 50,
+) -> list[dict[str, Any]]:
+    """Broad Crossref Works search (no prefix filter).
+
+    Heavy overlap with OpenAlex/Semantic Scholar is expected — dedup by
+    DOI handles it. The added value is regional-repository-hosted DOIs
+    (institutional repositories, JSTOR, Cambridge journals, etc.) that
+    OpenAlex sometimes under-samples.
+    """
+    out: list[dict[str, Any]] = []
+    base = "https://api.crossref.org/works"
+    headers = {
+        "User-Agent": (
+            f"litsweep/0.1 (mailto:{cfg.email or 'noreply@example.com'}; "
+            "research literature search)"
+        ),
+    }
+    for q in queries:
+        params = {
+            "query": q,
+            "rows": rows,
+            "select": "DOI,title,abstract,author,published,subject,URL,publisher,"
+                      "type,language,container-title",
+        }
+        resp = _request_with_retry("GET", base, params=params, headers=headers)
+        if resp is None or not resp.ok:
+            cfg.log_error("crossref", q,
+                          f"status={getattr(resp, 'status_code', 'NA')}")
+            time.sleep(0.5)
+            continue
+        try:
+            data = resp.json()
+        except Exception as exc:
+            cfg.log_error("crossref", q, f"json={exc}")
+            continue
+        cfg.dump_raw("crossref", q, data)
+        for r in (data.get("message") or {}).get("items") or []:
+            doi = r.get("DOI")
+            title_list = r.get("title") or []
+            title = title_list[0] if title_list else None
+            abstract = _strip_html(r.get("abstract") or "")
+            authors = "; ".join(
+                f"{a.get('family','')}, {a.get('given','')}".strip(", ")
+                for a in (r.get("author") or [])
+            )
+            published = r.get("published") or {}
+            year = None
+            dp = published.get("date-parts")
+            if isinstance(dp, list) and dp and isinstance(dp[0], list) and dp[0]:
+                year = dp[0][0]
+            url = r.get("URL") or (f"https://doi.org/{doi}" if doi else None)
+            container = (r.get("container-title") or [None])[0]
+            out.append({
+                "id": f"crossref:{doi}" if doi else f"crossref:{title[:80] if title else 'unknown'}",
+                "doi": doi,
+                "title": title,
+                "publication_year": year,
+                "language": r.get("language"),
+                "type": r.get("type"),
+                "abstract": abstract or None,
+                "authors": authors,
+                "source_journal_or_publisher": container or r.get("publisher") or "Crossref",
+                "cited_by_count": None,
+                "open_access_url": url,
+                "raw": json.dumps(r)[:5000],
+                "source_database": "crossref",
+            })
+        time.sleep(0.3)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# CORE.ac.uk — full-text aggregator that explicitly indexes university
+# institutional repositories. Catches the academia.edu / dspace /
+# JSTOR-hosted gray literature that OpenAlex routinely misses. The
+# anonymous tier works for moderate use; pass a CORE_API_KEY env var
+# in cfg.core_key for higher-volume access.
+# ---------------------------------------------------------------------------
+
+
+def search_core(
+    queries: Iterable[str],
+    cfg: ClientConfig,
+    *,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Search CORE.ac.uk Works API.
+
+    Note the trailing slash on the search path — without it the server
+    301-redirects through HTML (request.get follows redirects, but if
+    the caller's HTTP layer doesn't, you'll get HTML back).
+    """
+    out: list[dict[str, Any]] = []
+    base = "https://api.core.ac.uk/v3/search/works/"
+    headers = {}
+    core_key = getattr(cfg, "core_key", None)
+    if core_key:
+        headers["Authorization"] = f"Bearer {core_key}"
+    for q in queries:
+        params = {"q": q, "limit": limit}
+        resp = _request_with_retry("GET", base, params=params, headers=headers)
+        if resp is None or not resp.ok:
+            cfg.log_error("core", q,
+                          f"status={getattr(resp, 'status_code', 'NA')}")
+            time.sleep(0.5)
+            continue
+        try:
+            data = resp.json()
+        except Exception as exc:
+            cfg.log_error("core", q, f"json={exc}")
+            continue
+        cfg.dump_raw("core", q, data)
+        for r in data.get("results") or []:
+            doi = r.get("doi")
+            title = r.get("title")
+            abstract = r.get("abstract")
+            authors_list = r.get("authors") or []
+            authors = "; ".join(
+                a.get("name") for a in authors_list if isinstance(a, dict) and a.get("name")
+            )
+            year = r.get("yearPublished")
+            urls = r.get("sourceFulltextUrls") or []
+            url = urls[0] if urls else (f"https://doi.org/{doi}" if doi else None)
+            lang_obj = r.get("language") or {}
+            lang = lang_obj.get("code") if isinstance(lang_obj, dict) else None
+            publisher = r.get("publisher") or "CORE"
+            doctype = r.get("documentType")
+            cid = r.get("id") or doi or (title[:80] if title else "unknown")
+            if not title:
+                continue
+            out.append({
+                "id": f"core:{cid}",
+                "doi": doi,
+                "title": title,
+                "publication_year": year,
+                "language": lang,
+                "type": doctype,
+                "abstract": abstract or None,
+                "authors": authors,
+                "source_journal_or_publisher": publisher,
+                "cited_by_count": r.get("citationCount"),
+                "open_access_url": url,
+                "raw": json.dumps(r)[:5000],
+                "source_database": "core",
+            })
+        time.sleep(0.4)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Dispatch table
 # ---------------------------------------------------------------------------
 
@@ -937,4 +1284,8 @@ CLIENTS: dict[str, SearchFn] = {
     "base": search_base,
     "bdtd": search_bdtd,
     "scielo": search_scielo,
+    "europepmc": search_europepmc,
+    "eartharxiv": search_eartharxiv,
+    "crossref": search_crossref,
+    "core": search_core,
 }
