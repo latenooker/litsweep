@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Secrets / env
+.env
+.env.local
+*.key
+
+# Run artifacts: regenerable outputs stay out of git, the SUMMARY narrative
+# stays in.
+results/raw/*.json
+results/raw/*.jsonl
+# Per-batch raw caches (e.g. results/raw_wos_gap_2026-04-28/) and the
+# compressed parquet archives that get pushed to Drive instead of git.
+results/raw_*/
+results/raw_*.parquet
+# Side-channel WoS gap-fill record exports.
+results/wos_gap_records_*.csv
+results/errors.log
+results/run.log
+results/labeling_*.log
+results/run_*.log
+results/*_bibliography.csv
+results/*_bibliography.bib
+results/*_wos_screened.csv
+results/comparison/*.csv
+results/*_embedded.csv
+results/*_embedded.embeddings.npy
+results/*_embedded.embeddings.ids.txt
+results/*_labeled*.csv
+results/*_labeled*.checkpoints/
+!results/raw/.gitkeep
+
+# Obsidian vault config
+.obsidian/
+
+# litsweep is a scaffold-only repo: should never accumulate a
+# topic-specific queries.py, vocab.py, or *_lit_search.py from
+# someone test-running the scaffold inside this repo by mistake.
+# (litsweep_search.py is the canonical orchestrator template and
+# is intentionally tracked.)
+queries.py
+vocab.py
+foo_lit_search.py
+my_topic_search.py
+test_*_search.py
