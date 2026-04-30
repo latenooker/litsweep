@@ -39,11 +39,16 @@ SOURCE_QUERIES: dict[str, list[str]] = {
     "theses_fr": Q.THESES_FR,
     "base": Q.BASE,
     "bdtd": Q.BDTD,
+    "scielo": getattr(Q, "SCIELO", []),
 }
 
+# Defaults exclude the Starter-tier WoS endpoint (wos) and BASE because both
+# require API keys, and projects with WOS_EXPANDED_API_KEY get redundant
+# results from `wos_expanded`. Keep them in SOURCE_QUERIES so projects can
+# still opt in via --sources wos,base if desired.
 DEFAULT_SOURCES: tuple[str, ...] = (
-    "openalex", "semantic_scholar", "wos",
-    "hal", "theses_fr", "base", "bdtd",
+    "openalex", "semantic_scholar", "wos_expanded",
+    "hal", "theses_fr", "bdtd", "scielo",
 )
 
 

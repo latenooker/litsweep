@@ -815,6 +815,113 @@ def search_bdtd(queries: Iterable[str], cfg: ClientConfig) -> list[dict[str, Any
 
 
 # ---------------------------------------------------------------------------
+# SciELO — public-search HTML scraper (no API key)
+# ---------------------------------------------------------------------------
+
+# Country / collection suffix on the SciELO record id → ISO 639-1 language.
+# Most collections publish in their national language; SciELO Brasil = pt,
+# the Spanish-American collections = es. The labelers downstream will
+# refine if a record turns out to be English.
+_SCIELO_COLLECTION_LANG: dict[str, str] = {
+    "bra": "pt", "scl": "pt",      # Brasil + SciELO core (mostly Brazilian)
+    "prt": "pt", "cap": "pt",      # Portugal, Cabo Verde
+    "mex": "es", "arg": "es", "chl": "es", "col": "es", "ven": "es",
+    "cri": "es", "per": "es", "cub": "es", "ury": "es", "bol": "es",
+    "ecu": "es", "pry": "es",
+    "esp": "es",                   # Spain
+    "sza": "en",                   # South Africa
+}
+
+
+def search_scielo(queries: Iterable[str], cfg: ClientConfig) -> list[dict[str, Any]]:
+    """Search SciELO via the public search interface.
+
+    SciELO's JSON API was retired; the supported public path is the
+    HTML search at ``https://search.scielo.org/?q=...&output=site``.
+    A real-browser User-Agent is required (server returns 403 to
+    default Python/curl UAs).
+
+    Each result ``div.item`` carries the SciELO PID in its ``id``
+    attribute (e.g. ``S0016-71692024000401225-mex``); the trailing
+    three-letter token identifies the regional collection and is
+    used to seed the ``language`` field. Title, authors, journal,
+    year, and the article HTML URL are scraped per-item.
+    """
+    out: list[dict[str, Any]] = []
+    base = "https://search.scielo.org/"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en,es;q=0.8,pt;q=0.7",
+    }
+    for q in queries:
+        # `lang=all` returns HTTP 500; SciELO defaults to all-language
+        # search when the parameter is omitted, so leave it out.
+        params = {"q": q, "output": "site", "count": 100}
+        resp = _request_with_retry("GET", base, params=params, headers=headers)
+        if resp is None or not resp.ok:
+            cfg.log_error("scielo", q, f"status={getattr(resp, 'status_code', 'NA')}")
+            time.sleep(1.0)
+            continue
+        cfg.dump_raw("scielo", q, {"html": resp.text[:300_000]})
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for it in soup.select("div.item"):
+            pid = (it.get("id") or "").strip()
+            if not pid:
+                continue
+            collection = pid.rsplit("-", 1)[-1] if "-" in pid else ""
+            lang = _SCIELO_COLLECTION_LANG.get(collection)
+            title_tag = it.select_one("strong.title")
+            title = title_tag.get_text(strip=True) if title_tag else None
+            url_tag = it.select_one('a[href*="sci_arttext"]')
+            url = url_tag.get("href") if url_tag else None
+            authors_tag = it.select_one(".authors")
+            authors = authors_tag.get_text(" ", strip=True) if authors_tag else ""
+            # Journal + year live in subsequent .line blocks; pull the
+            # one whose first non-empty token matches a 4-digit year.
+            journal = None
+            year: int | None = None
+            for line in it.select(".line"):
+                txt = line.get_text(" ", strip=True)
+                # 'Geofísica internacional ... Dic 2024, Volumen 63 Nº 4'
+                if not journal and "," in txt and len(txt) < 200:
+                    # First reasonably-short .line that isn't the title
+                    # or the authors usually has the journal name first.
+                    parts = [p.strip() for p in txt.split() if p.strip()]
+                    if parts and parts[0].isalpha():
+                        journal = txt.split(" Métricas")[0].split(" Sobre")[0]
+                for tok in txt.split():
+                    if tok.isdigit() and len(tok) == 4 and 1900 <= int(tok) <= 2100:
+                        year = int(tok)
+                        break
+                if year:
+                    break
+            if not title:
+                continue
+            out.append({
+                "id": f"scielo:{pid}",
+                "doi": None,
+                "title": title,
+                "publication_year": year,
+                "language": lang,
+                "type": "article",
+                "abstract": None,  # rendered separately on each article page
+                "authors": authors,
+                "source_journal_or_publisher": journal or "SciELO",
+                "cited_by_count": None,
+                "open_access_url": url,
+                "raw": str(it)[:5000],
+                "source_database": "scielo",
+            })
+        time.sleep(1.0)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Dispatch table
 # ---------------------------------------------------------------------------
 
@@ -829,4 +936,5 @@ CLIENTS: dict[str, SearchFn] = {
     "theses_fr": search_theses_fr,
     "base": search_base,
     "bdtd": search_bdtd,
+    "scielo": search_scielo,
 }

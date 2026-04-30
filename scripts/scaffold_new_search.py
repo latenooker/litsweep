@@ -401,6 +401,15 @@ BASE: list[str] = OPENALEX_GROUP_A_CORE_EN[:6]
 BDTD: list[str] = [
     # TODO: Portuguese translations.
 ]
+
+# ---------------------------------------------------------------------------
+# SciELO — Latin-American + Iberian aggregator. Public HTML search.
+# Spanish + Portuguese strings work best here; English strings work too.
+# ---------------------------------------------------------------------------
+
+SCIELO: list[str] = [
+    # TODO: 4-8 short Spanish / Portuguese keyword strings.
+]
 '''
     (target / "queries.py").write_text(content, encoding="utf-8")
 
