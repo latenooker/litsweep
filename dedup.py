@@ -105,16 +105,34 @@ def dedup(df: pd.DataFrame, title_threshold: float = 0.85) -> pd.DataFrame:
     # than auto-merge. Records with no language fall in the "" bucket.
     title_buckets: dict[str, list[tuple[frozenset[str], int]]] = defaultdict(list)
 
+    def _row_sources(row: pd.Series) -> set[str]:
+        """Source set for one row.
+
+        Accepts either the per-source ``source_database`` column written
+        by the API clients OR the union ``source_databases`` column
+        produced by a previous ``dedup`` pass. This makes ``dedup``
+        idempotent — re-running it on an already-merged frame (e.g. as
+        part of ``merge_gap_fill``) preserves the prior union instead
+        of wiping it.
+        """
+        plural = row.get("source_databases")
+        if isinstance(plural, str) and plural:
+            return {s for s in plural.split("|") if s}
+        singular = row.get("source_database")
+        if isinstance(singular, str) and singular:
+            return {singular}
+        return set()
+
     for _, row in df.iterrows():
         norm_doi = row["_norm_doi"]
-        src = row.get("source_database", "")
+        sources = _row_sources(row)
         if norm_doi:
             if norm_doi in doi_index:
-                sources_per_row[doi_index[norm_doi]].add(src)
+                sources_per_row[doi_index[norm_doi]].update(sources)
                 continue
             doi_index[norm_doi] = len(out_rows)
             out_rows.append(row.to_dict())
-            sources_per_row.append({src})
+            sources_per_row.append(set(sources))
             continue
 
         # No DOI — try title-similarity match within language bucket.
@@ -131,12 +149,12 @@ def dedup(df: pd.DataFrame, title_threshold: float = 0.85) -> pd.DataFrame:
                     match_idx = cand_idx
                     break
         if match_idx is not None:
-            sources_per_row[match_idx].add(src)
+            sources_per_row[match_idx].update(sources)
             continue
 
         idx = len(out_rows)
         out_rows.append(row.to_dict())
-        sources_per_row.append({src})
+        sources_per_row.append(set(sources))
         if toks:
             title_buckets[lang].append((toks, idx))
 
