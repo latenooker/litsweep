@@ -65,6 +65,9 @@ def _load_anchors(scripts_dir: Path) -> list[str]:
     if spec is None or spec.loader is None:
         raise SystemExit(f"Could not import {spec_path}")
     module = importlib.util.module_from_spec(spec)
+    # Register before exec_module so @dataclass can resolve cls.__module__
+    # via sys.modules during evaluation (required on Python 3.13+).
+    sys.modules["embed_filter"] = module
     spec.loader.exec_module(module)
     return list(module.ANCHORS)
 
