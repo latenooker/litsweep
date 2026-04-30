@@ -61,6 +61,10 @@ STANFORD_DEFAULT_URL = "https://aiapi-prod.stanford.edu/v1"
 STANFORD_DEFAULT_MODEL = "gemini-2.0-flash-lite-001"
 REQUEST_TIMEOUT_S = 60
 MAX_RETRIES = 3
+# 429s get their own counter so a temporarily-throttled gateway doesn't
+# burn the regular MAX_RETRIES budget. Backoff is bounded to keep a
+# permanently broken endpoint from looping forever.
+MAX_429_RETRIES = 8
 
 SYSTEM_PROMPT = """\
 You are a soil-science / regolith-geology research librarian. Given the \
@@ -220,7 +224,9 @@ def call_stanford(prompt: str, cfg: StanfordConfig) -> dict[str, Any]:
         },
     )
 
-    for attempt in range(MAX_RETRIES):
+    attempt = 0
+    rate_limit_attempts = 0
+    while attempt < MAX_RETRIES:
         try:
             with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_S) as resp:
                 body = json.loads(resp.read())
@@ -229,9 +235,19 @@ def call_stanford(prompt: str, cfg: StanfordConfig) -> dict[str, Any]:
         except urllib.error.HTTPError as exc:
             err_body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
             if exc.code == 429:
-                wait = min(2 ** (attempt + 2), 60)
-                logger.warning("429 rate limit, sleeping %ds", wait)
+                rate_limit_attempts += 1
+                if rate_limit_attempts >= MAX_429_RETRIES:
+                    return _error_label(
+                        f"HTTP 429 after {MAX_429_RETRIES} retries"
+                    )
+                # Backoff: 4, 8, 16, 30, 60, 60, 60, 60s. Doesn't burn
+                # the regular MAX_RETRIES budget — a throttled gateway
+                # is a transient signal, not an error to give up on.
+                wait = min(2 ** (rate_limit_attempts + 1), 60)
+                logger.warning("429 rate limit (%d/%d), sleeping %ds",
+                               rate_limit_attempts, MAX_429_RETRIES, wait)
                 time.sleep(wait)
+                continue  # do NOT increment attempt
             elif attempt < MAX_RETRIES - 1:
                 logger.warning("HTTP %d (attempt %d): %s",
                                exc.code, attempt + 1, err_body[:200])
@@ -250,6 +266,7 @@ def call_stanford(prompt: str, cfg: StanfordConfig) -> dict[str, Any]:
                 time.sleep(2 ** attempt)
             else:
                 return _error_label(str(exc))
+        attempt += 1
     return _error_label("max retries exhausted")
 
 
