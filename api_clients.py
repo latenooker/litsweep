@@ -1059,7 +1059,10 @@ def search_eartharxiv(
             "query": q,
             "filter": "prefix:10.31223,type:posted-content",
             "rows": rows,
-            "select": "DOI,title,abstract,author,published,subject,URL,publisher,type,language",
+            # Note: Crossref's /works `select` rejects `language` and `type`
+            # with HTTP 400. Both fields are still returned at the row level
+            # under the default selection, so just trim the select list.
+            "select": "DOI,title,abstract,author,published,URL,publisher,container-title",
         }
         resp = _request_with_retry("GET", base, params=params, headers=headers)
         if resp is None or not resp.ok:
@@ -1140,8 +1143,8 @@ def search_crossref(
         params = {
             "query": q,
             "rows": rows,
-            "select": "DOI,title,abstract,author,published,subject,URL,publisher,"
-                      "type,language,container-title",
+            # Crossref's /works `select` rejects `language` and `type`.
+            "select": "DOI,title,abstract,author,published,URL,publisher,container-title",
         }
         resp = _request_with_retry("GET", base, params=params, headers=headers)
         if resp is None or not resp.ok:
