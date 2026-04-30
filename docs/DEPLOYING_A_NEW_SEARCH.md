@@ -78,7 +78,18 @@ What it does:
   `vocab.py` ships with the `VOCAB_AXES` registry pattern so adding
   axes is a one-line change.
 - Writes a minimal `README.md` and `CLAUDE.md`.
-- `git init -b main` (skip with `--no-git`).
+- `git init -b main`, stages everything, makes the initial commit
+  (skip the entire git workflow with `--no-git`).
+- **Creates a private GitHub repo via `gh repo create` and pushes
+  the initial commit.** Repo name is the slug with underscores
+  rewritten to dashes (e.g. `--name worm_tea_lit` → `worm-tea-lit`).
+  The owner defaults to your `gh` auth'd user; pass
+  `--remote-owner <org>` for an org. Skip with `--no-remote`; use
+  `--public` if the search shouldn't be private.
+
+If `gh` isn't installed, isn't auth'd, or the repo already exists,
+the scaffold prints the manual `gh repo create` command and
+continues — the local repo is still complete.
 
 The `--from` flag exists for backwards compatibility (scaffold from
 a sibling project) but is discouraged. Prefer the canonical litsweep

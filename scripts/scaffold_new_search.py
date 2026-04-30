@@ -1,10 +1,16 @@
 """Scaffold a new lit-search project from the litsweep template.
 
 Copies the shared infrastructure (api_clients, dedup, requirements,
-all scripts) into a new project directory and stubs out the four
-topic-specific files (queries.py, vocab.py, ANCHORS, SYSTEM_PROMPT).
-Source of truth lives in this litsweep repo; running this script is
-the only supported way to start a new search.
+all scripts) into a new project directory, stubs out the four
+topic-specific files (queries.py, vocab.py, ANCHORS, SYSTEM_PROMPT),
+runs ``git init`` + the initial commit, and (by default) creates a
+private GitHub repo via the ``gh`` CLI and pushes. Source of truth
+lives in this litsweep repo; running this script is the only
+supported way to start a new search.
+
+Pass ``--no-remote`` to skip the GitHub repo step (e.g. offline, or
+to push later). Pass ``--public`` if the new search shouldn't be
+private. Pass ``--no-git`` to skip the git workflow entirely.
 
 What it does
 ------------
@@ -178,6 +184,91 @@ def _replace_module_docstring(text: str, dst_slug: str) -> str:
         dst_slug=dst_slug, dst_dashed=dst_dashed,
     )
     return placeholder + text[match.end():]
+
+
+def _git_init_and_commit(target: Path) -> bool:
+    """Run ``git init`` and the initial commit in *target*.
+
+    Returns True on success. Logs and returns False if git is missing
+    or any step fails — the caller will skip the remote step.
+    """
+    try:
+        subprocess.run(
+            ["git", "init", "-b", "main"],
+            cwd=target, check=True, capture_output=True,
+        )
+        print("  git init -b main")
+        subprocess.run(
+            ["git", "add", "."],
+            cwd=target, check=True, capture_output=True,
+        )
+        msg = (
+            "Initial scaffold from litsweep\n"
+            "\n"
+            "Topic-specific files (queries.py, vocab.py, ANCHORS, "
+            "SYSTEM_PROMPT) are stubbed; fill them in per "
+            "litsweep/docs/DEPLOYING_A_NEW_SEARCH.md."
+        )
+        subprocess.run(
+            ["git", "commit", "-m", msg],
+            cwd=target, check=True, capture_output=True,
+        )
+        print("  git commit (initial scaffold)")
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        stderr = getattr(exc, "stderr", b"")
+        stderr_text = stderr.decode("utf-8", errors="replace") if stderr else str(exc)
+        print(f"  git init/commit skipped: {stderr_text.strip()}",
+              file=sys.stderr)
+        return False
+
+
+def _gh_create_and_push(
+    *,
+    target: Path,
+    slug: str,
+    owner: str | None,
+    private: bool,
+) -> str | None:
+    """Create a GitHub repo via the ``gh`` CLI and push the initial commit.
+
+    Repo name is derived from *slug* (snake_case → kebab-case). Visibility
+    is private by default to match the rest of the lit-search family.
+    Returns the new remote URL on success or None on failure (gh
+    missing/unauth'd, repo already exists, network error). Never raises
+    — a missing remote is recoverable; the user can create it manually.
+    """
+    repo_name = slug.replace("_", "-")
+    full_name = f"{owner}/{repo_name}" if owner else repo_name
+    visibility_flag = "--private" if private else "--public"
+    description = (
+        f"{repo_name} — multilingual lit-search corpus, scaffolded "
+        f"from litsweep."
+    )
+    cmd = [
+        "gh", "repo", "create", full_name,
+        visibility_flag,
+        "--source", str(target),
+        "--description", description,
+        "--push",
+    ]
+    try:
+        result = subprocess.run(
+            cmd, cwd=target, check=True, capture_output=True, text=True,
+        )
+    except FileNotFoundError:
+        print("  gh CLI not found; skipping remote create.", file=sys.stderr)
+        return None
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        print(f"  gh repo create failed: {stderr}", file=sys.stderr)
+        return None
+    # gh prints the URL on stdout; first line is canonical.
+    url = (result.stdout or "").strip().splitlines()
+    remote_url = url[0] if url else f"https://github.com/{full_name}"
+    print(f"  gh repo create {full_name} ({'private' if private else 'public'})")
+    print(f"  pushed initial commit to {remote_url}")
+    return remote_url
 
 
 def _replace_anchors(embed_filter_path: Path) -> None:
@@ -519,7 +610,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--src-slug",
                         help="Override the auto-detected source slug.")
     parser.add_argument("--no-git", action="store_true",
-                        help="Skip `git init -b main` in the target.")
+                        help="Skip `git init`, the initial commit, and the "
+                             "remote-create step in the target.")
+    parser.add_argument("--no-remote", action="store_true",
+                        help="Run `git init` and the initial commit but skip "
+                             "the `gh repo create` step. Use when you want "
+                             "to scaffold offline or push the remote later.")
+    parser.add_argument("--remote-owner", default=None,
+                        help="GitHub owner (user or org) for the new remote. "
+                             "Default: the gh CLI's auth'd user.")
+    parser.add_argument("--public", action="store_true",
+                        help="Create the GitHub repo as public. Default is "
+                             "private (matches the rest of the lit-search family).")
     parser.add_argument("--force", action="store_true",
                         help="Overwrite the target if it already exists.")
     args = parser.parse_args(argv)
@@ -598,17 +700,23 @@ def main(argv: list[str] | None = None) -> int:
     _write_claude_md(target, dst_slug)
     print(f"  wrote: README.md, CLAUDE.md")
 
-    # git init
+    # git init + first commit + (default) gh repo create + push
+    remote_url: str | None = None
     if not args.no_git:
-        try:
-            subprocess.run(["git", "init", "-b", "main"], cwd=target,
-                           check=True, capture_output=True)
-            print(f"  git init -b main")
-        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-            print(f"  git init skipped: {exc}", file=sys.stderr)
+        if not _git_init_and_commit(target):
+            args.no_remote = True  # fall through; can't push without a commit
+        if not args.no_remote:
+            remote_url = _gh_create_and_push(
+                target=target,
+                slug=dst_slug,
+                owner=args.remote_owner,
+                private=not args.public,
+            )
 
     print()
     print(f"Scaffolded {target}.")
+    if remote_url:
+        print(f"Remote : {remote_url}")
     print("Next steps (in order):")
     print("  1. Edit queries.py with topic-specific search strings.")
     print("  2. Edit vocab.py with topic vocabularies.")
@@ -617,6 +725,13 @@ def main(argv: list[str] | None = None) -> int:
     print("  5. python -m pip install -r requirements.txt")
     print(f"  6. python {dst_slug}_search.py --dry-run   # smoke-test queries")
     print(f"  7. python {dst_slug}_search.py             # full run")
+    if not remote_url and not args.no_git and not args.no_remote:
+        print()
+        print("Note: remote was not created (gh CLI unavailable, not auth'd, "
+              "or repo already exists). Create manually with:")
+        repo_name = dst_slug.replace("_", "-")
+        print(f"  gh repo create <owner>/{repo_name} --private "
+              f"--source={target} --push")
     return 0
 
 

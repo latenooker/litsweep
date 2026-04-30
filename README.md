@@ -18,6 +18,23 @@ python /path/to/litsweep/scripts/scaffold_new_search.py \
     /path/to/new-project --name my_topic
 ```
 
+That single command:
+
+1. Creates the project directory tree per
+   [docs/DIRECTORY_STRUCTURE.md](docs/DIRECTORY_STRUCTURE.md).
+2. Byte-copies shared infra; templates the orchestrator and scripts
+   with slug substitution; stubs the four topic-specific files.
+3. Runs `git init` + the initial commit.
+4. **Creates a private GitHub repo via `gh repo create` and pushes**
+   the commit. Repo name = slug with underscores → dashes.
+
+Flags:
+
+- `--no-remote` — skip the `gh repo create` step (offline scaffold).
+- `--public` — create the repo as public (default is private).
+- `--remote-owner <org>` — owner override (default: your gh user).
+- `--no-git` — skip the entire git workflow.
+
 Then fill in the four topic-specific files (queries, vocab, ANCHORS,
 SYSTEM_PROMPT) per [docs/DEPLOYING_A_NEW_SEARCH.md](docs/DEPLOYING_A_NEW_SEARCH.md).
 
