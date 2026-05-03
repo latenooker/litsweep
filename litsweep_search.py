@@ -262,6 +262,20 @@ def _bibtex_key(row: dict) -> str:
     return f"{first_author}{year}{first_word}".lower()
 
 
+def _format_bibtex_authors(s: str) -> str:
+    """Convert our semicolon-delimited author string to BibTeX form.
+
+    Upstream APIs are normalized to ``"Last, First; Last, First; ..."``
+    (see ``api_clients.py``). BibTeX/BibLaTeX — and therefore Zotero —
+    require authors to be joined by the literal token `` and ``; a
+    semicolon is treated as part of a name, which is why Zotero ingests
+    the whole list as a single mangled author.
+    """
+    parts = [p.strip() for p in s.split(";")]
+    parts = [p for p in parts if p]
+    return " and ".join(parts)
+
+
 def _bibtex_entry(row: dict) -> str:
     rec_type = _str_or_empty(row.get("type")).lower()
     if "thesis" in rec_type or "dissertation" in rec_type:
@@ -284,6 +298,10 @@ def _bibtex_entry(row: dict) -> str:
         sval = _str_or_empty(row.get(src_key))
         if not sval:
             continue
+        if key == "author":
+            sval = _format_bibtex_authors(sval)
+            if not sval:
+                continue
         fields.append((key, _bibtex_escape(sval)))
     body = ",\n  ".join(f"{k} = {{{v}}}" for k, v in fields)
     return f"@{entry_type}{{{_bibtex_key(row)},\n  {body}\n}}\n"
