@@ -142,6 +142,13 @@ Rules:
 # ---------------------------------------------------------------------------
 
 
+# Module-level monotonic clock for the optional client-side rate
+# limiter (see --min-interval-s). Initialised the first time
+# ``call_stanford`` is hit; threading not required because the
+# orchestrator labels rows serially.
+_LAST_REQUEST_T: float = 0.0
+
+
 @dataclass
 class StanfordConfig:
     """Stanford gateway configuration."""
@@ -151,6 +158,13 @@ class StanfordConfig:
     model: str = STANFORD_DEFAULT_MODEL
     temperature: float = 0.0
     max_tokens: int = 400
+    # Minimum wall-clock seconds between successive ``call_stanford``
+    # invocations. ``0`` (default) leaves the labeler reactive: only
+    # back off when the gateway returns 429. Set to e.g. ``1.5`` to
+    # pre-throttle below the gateway's per-second quota and avoid the
+    # bursty 429s seen in worm-tea-lit's 31k-row run on 2026-04-30
+    # (~20 events sleeping 8-16 s each, total ~3 min lost).
+    min_interval_s: float = 0.0
 
 
 def check_stanford(cfg: StanfordConfig) -> None:
@@ -203,7 +217,20 @@ def _error_label(reason: str) -> dict[str, Any]:
 
 
 def call_stanford(prompt: str, cfg: StanfordConfig) -> dict[str, Any]:
-    """Call Stanford gateway; return parsed JSON or an error label."""
+    """Call Stanford gateway; return parsed JSON or an error label.
+
+    If ``cfg.min_interval_s > 0``, sleeps until at least that much
+    monotonic time has passed since the previous successful submission.
+    The pre-throttle wraps the entire retry loop, so a 429-driven
+    sleep doesn't double up with the client-side cap.
+    """
+    global _LAST_REQUEST_T
+    if cfg.min_interval_s > 0:
+        elapsed = time.monotonic() - _LAST_REQUEST_T
+        if elapsed < cfg.min_interval_s:
+            time.sleep(cfg.min_interval_s - elapsed)
+    _LAST_REQUEST_T = time.monotonic()
+
     payload = json.dumps({
         "model": cfg.model,
         "messages": [
@@ -373,6 +400,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Default: <out>.checkpoints/",
     )
     parser.add_argument("--chunk-size", type=int, default=50)
+    parser.add_argument(
+        "--min-interval-s", type=float, default=0.0,
+        help="Pre-throttle: minimum seconds between successive gateway "
+             "requests. Default 0 (reactive only — back off on 429). "
+             "Set to e.g. 1.5 on a long run if the gateway is 429ing "
+             "during multi-hour labels (worm-tea-lit's 31k-row run on "
+             "2026-04-30 hit ~20 429s; min-interval-s 1.5 would have "
+             "preempted them).",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -381,7 +417,10 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    cfg = StanfordConfig(api_key=args.api_key, api_url=args.api_url, model=args.model)
+    cfg = StanfordConfig(
+        api_key=args.api_key, api_url=args.api_url, model=args.model,
+        min_interval_s=args.min_interval_s,
+    )
     check_stanford(cfg)
 
     df = pd.read_csv(args.csv)
