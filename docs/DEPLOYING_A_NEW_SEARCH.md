@@ -95,6 +95,35 @@ The `--from` flag exists for backwards compatibility (scaffold from
 a sibling project) but is discouraged. Prefer the canonical litsweep
 flow above.
 
+### Avoiding redundant harvest with `--from-existing-corpus`
+
+If your new project's scope overlaps a sibling project's corpus, pass
+the sibling's labeled-corpus CSV (or Parquet) once at scaffold time
+and the harvest will skip every DOI it contains:
+
+```bash
+python /path/to/litsweep/scripts/scaffold_new_search.py \
+    /path/to/new-project --name my_topic \
+    --from-existing-corpus /path/to/sibling/results/<sibling>_labeled_corpus.csv
+```
+
+The flag is repeatable (pass it twice for two siblings). It writes
+the union of DOIs to `data/doi_exclude.txt` in the new project; the
+orchestrator's `--doi-exclude data/doi_exclude.txt` flag (on by
+default) reads that file right after the dedup step and drops every
+matching record before embed + label spend.
+
+The exclude is "every DOI from the sibling," not just the
+in-scope-for-the-new-topic subset — the assumption is that if the
+sibling already harvested it, you don't want to re-fetch and
+re-label it; you want to *carry the existing label over* if the
+record is also in scope here. For the carryover step itself
+(scoring sibling records against your new anchors and pulling in
+the relevant ones), see the per-project filter pattern in
+`pparadox/run_native_sand_pparadox_filter.py` — this stays out of
+litsweep because it depends on whichever sibling project you're
+filtering from.
+
 ## Step 2 — fill in the four topic-specific files
 
 This is the work the scaffold can't do for you. Each file has TODO

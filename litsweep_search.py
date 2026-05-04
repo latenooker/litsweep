@@ -405,6 +405,15 @@ def main(argv: list[str] | None = None) -> int:
                              f"Default: {','.join(DEFAULT_SOURCES)}")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print queries that would run, then exit.")
+    parser.add_argument(
+        "--doi-exclude", default="data/doi_exclude.txt",
+        help="Path to a newline-delimited DOI list to drop after dedup. "
+             "Records with a matching DOI are filtered out so the rest "
+             "of the pipeline (embed + label) only sees novel content. "
+             "Default: data/doi_exclude.txt — written by "
+             "scripts/scaffold_new_search.py --from-existing-corpus, "
+             "or hand-managed. Set to '' to disable.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -447,6 +456,32 @@ def main(argv: list[str] | None = None) -> int:
 
     deduped = dedup_mod.dedup_iter(kept)
     logger.info("After dedup: %d", len(deduped))
+
+    # Cross-project DOI exclusion. Loads a newline-delimited file of
+    # lower-cased DOIs already harvested in a sibling project (default
+    # data/doi_exclude.txt, populated by
+    # scripts/scaffold_new_search.py --from-existing-corpus or
+    # hand-managed). Records with matching DOIs are dropped here so
+    # downstream embed + label only see novel content.
+    if args.doi_exclude:
+        excl_path = Path(args.doi_exclude)
+        if excl_path.exists():
+            excl = {ln.strip().lower() for ln in excl_path.read_text().splitlines()
+                    if ln.strip()}
+            before = len(deduped)
+            deduped = [
+                r for r in deduped
+                if str(r.get("doi", "") or "").strip().lower() not in excl
+            ]
+            logger.info(
+                "DOI exclude (%s): dropped %d records → %d remaining",
+                excl_path, before - len(deduped), len(deduped),
+            )
+        else:
+            logger.warning(
+                "--doi-exclude %s not found; skipping cross-project filter",
+                excl_path,
+            )
 
     augmented = _augment(deduped)
     augmented = augmented.sort_values("priority_score", ascending=False)

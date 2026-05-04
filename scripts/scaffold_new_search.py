@@ -143,9 +143,93 @@ def _detect_src_slug(src_root: Path) -> str:
     )
 
 
+def _extract_dois_from_corpus(path: Path) -> list[str]:
+    """Read *path* (CSV or Parquet) and return a sorted, lower-cased,
+    de-duplicated list of non-blank DOIs from its ``doi`` column.
+
+    Used by ``--from-existing-corpus`` to seed ``data/doi_exclude.txt``
+    in the new project so the harvest skips records already present in
+    a sibling project.
+    """
+    suffix = path.suffix.lower()
+    try:
+        import pandas as pd  # local import; pandas is a litsweep dep already
+    except Exception as exc:
+        raise SystemExit(f"--from-existing-corpus needs pandas: {exc}")
+    if suffix in (".csv", ".tsv"):
+        df = pd.read_csv(path, low_memory=False, sep="," if suffix == ".csv" else "\t")
+    elif suffix in (".parquet", ".pq"):
+        df = pd.read_parquet(path)
+    else:
+        raise SystemExit(
+            f"--from-existing-corpus expects .csv / .tsv / .parquet, got {suffix} ({path})"
+        )
+    if "doi" not in df.columns:
+        raise SystemExit(
+            f"corpus {path} has no 'doi' column; columns: {list(df.columns)[:8]}…"
+        )
+    dois = (
+        df["doi"].dropna().astype(str).str.strip().str.lower()
+        .replace({"": None}).dropna().unique().tolist()
+    )
+    return sorted(dois)
+
+
 def _copy_byte(src: Path, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
+
+
+# Lines and exact filenames in litsweep's own ``.gitignore`` that exist
+# only to prevent test-runs of the scaffold from polluting the litsweep
+# template repo. They must NOT propagate to deployed projects, where
+# ``queries.py`` and ``vocab.py`` are the project identity and need to
+# be tracked. The block runs from the ``# litsweep is a scaffold-only``
+# comment to the end of the file (or the next blank-line gap, whichever
+# comes first).
+_GITIGNORE_LITSWEEP_BLOCK_HEAD = (
+    "# litsweep is a scaffold-only repo:"
+)
+_GITIGNORE_LITSWEEP_REPLACEMENT = (
+    "# Scaffold-only excludes (queries.py / vocab.py / placeholder\n"
+    "# *_lit_search.py stubs from the litsweep template) intentionally\n"
+    "# removed: this is a deployed project, not the scaffold itself, so\n"
+    "# queries.py and vocab.py are the project identity and must be\n"
+    "# tracked.\n"
+)
+
+
+def _copy_gitignore_filtered(src: Path, dst: Path) -> None:
+    """Copy litsweep's ``.gitignore`` to *dst* with the litsweep-only
+    scaffold-protection block stripped.
+
+    The litsweep ``.gitignore`` deliberately ignores ``queries.py`` and
+    ``vocab.py`` so a maintainer test-running ``scaffold_new_search.py``
+    inside the litsweep repo doesn't accidentally commit a topic-
+    specific stub to the canonical template. Those rules are wrong for
+    deployed projects, where those files are the project's identity.
+    Strip the block when scaffolding a new project.
+    """
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    text = src.read_text(encoding="utf-8")
+    out_lines: list[str] = []
+    in_block = False
+    for line in text.splitlines(keepends=True):
+        if not in_block and line.lstrip().startswith(_GITIGNORE_LITSWEEP_BLOCK_HEAD):
+            in_block = True
+            out_lines.append(_GITIGNORE_LITSWEEP_REPLACEMENT)
+            continue
+        if in_block:
+            # Block continues until end of file or first blank-line
+            # separator. The litsweep .gitignore puts this block last,
+            # so EOF is the typical terminator.
+            stripped = line.strip()
+            if stripped == "":
+                in_block = False
+                # don't emit the blank either; tidy.
+            continue
+        out_lines.append(line)
+    dst.write_text("".join(out_lines), encoding="utf-8")
 
 
 def _copy_with_subst(src: Path, dst: Path, src_slug: str, dst_slug: str) -> None:
@@ -677,6 +761,17 @@ def main(argv: list[str] | None = None) -> int:
                              "private (matches the rest of the lit-search family).")
     parser.add_argument("--force", action="store_true",
                         help="Overwrite the target if it already exists.")
+    parser.add_argument(
+        "--from-existing-corpus", dest="from_existing_corpus",
+        type=Path, action="append", default=[],
+        metavar="PATH",
+        help="Path to an existing labeled-corpus CSV / TSV / Parquet "
+             "from a sibling project. Every DOI in the file gets "
+             "written to data/doi_exclude.txt in the new project, "
+             "which the orchestrator's --doi-exclude flag honours after "
+             "dedup so the harvest never re-fetches those records. "
+             "Repeatable; the union of all corpora is used.",
+    )
     args = parser.parse_args(argv)
 
     target: Path = args.target.resolve()
@@ -698,11 +793,41 @@ def main(argv: list[str] | None = None) -> int:
     for sub in ("scripts", "docs/session_logs", "results/raw"):
         (target / sub).mkdir(parents=True, exist_ok=True)
     (target / "results/raw/.gitkeep").touch()
+    # data/ holds DOI exclude lists, carryover bibliographies, and any
+    # other small derived inputs the orchestrator needs at run time.
+    # Created unconditionally so `--from-existing-corpus` and downstream
+    # filtering scripts have a stable home.
+    (target / "data").mkdir(parents=True, exist_ok=True)
 
-    # Copy shared infra exactly
+    # If the caller passed --from-existing-corpus, extract DOIs from
+    # each source file and write the union to data/doi_exclude.txt.
+    # The orchestrator's --doi-exclude flag (default data/doi_exclude.txt)
+    # honors this list right after dedup.
+    if args.from_existing_corpus:
+        all_dois: set[str] = set()
+        for corpus_path in args.from_existing_corpus:
+            corpus_path = corpus_path.resolve()
+            if not corpus_path.exists():
+                raise SystemExit(f"--from-existing-corpus: {corpus_path} not found")
+            dois = _extract_dois_from_corpus(corpus_path)
+            print(f"  from-corpus: {corpus_path.name} → {len(dois)} DOIs")
+            all_dois.update(dois)
+        excl = target / "data/doi_exclude.txt"
+        excl.write_text("\n".join(sorted(all_dois)) + "\n", encoding="utf-8")
+        print(f"  wrote {excl.relative_to(target)} ({len(all_dois)} unique DOIs)")
+
+    # Copy shared infra. ``.gitignore`` gets the filtered copy that
+    # strips litsweep's scaffold-protection block (which would
+    # otherwise silently ignore ``queries.py`` and ``vocab.py`` in the
+    # deployed project). Everything else is byte-for-byte.
     for rel in SHARED_INFRA:
         src = src_root / rel
-        if src.exists():
+        if not src.exists():
+            continue
+        if rel == ".gitignore":
+            _copy_gitignore_filtered(src, target / rel)
+            print(f"  filter-copy: {rel}")
+        else:
             _copy_byte(src, target / rel)
             print(f"  byte-copy: {rel}")
 
@@ -781,6 +906,12 @@ def main(argv: list[str] | None = None) -> int:
     print("  5. python -m pip install -r requirements.txt")
     print(f"  6. python {dst_slug}_search.py --dry-run   # smoke-test queries")
     print(f"  7. python {dst_slug}_search.py             # full run")
+    if args.from_existing_corpus:
+        print()
+        print(f"  Note: data/doi_exclude.txt seeded from "
+              f"{len(args.from_existing_corpus)} sibling corpus file(s); the "
+              f"orchestrator's --doi-exclude flag (default-on) will drop "
+              f"matching DOIs after dedup.")
     if not remote_url and not args.no_git and not args.no_remote:
         print()
         print("Note: remote was not created (gh CLI unavailable, not auth'd, "
