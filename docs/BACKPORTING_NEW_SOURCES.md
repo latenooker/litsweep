@@ -17,6 +17,65 @@ to the four pre-litsweep siblings:
 …and to any newer projects (currently `char14c`) that were scaffolded
 before a particular fix landed.
 
+## Critical: dedup idempotence (back-port even if you back-port nothing else)
+
+If your project was scaffolded **before litsweep commit `780588c`**
+("dedup: read existing source_databases column when available"), its
+local `dedup.py` has a silent data-loss bug:
+
+- `dedup()` reads `source_database` (singular) from input rows.
+- An already-deduped CSV — like one that comes back through
+  `merge_gap_fill.py` — only has `source_databases` (plural).
+- So every output row gets `source_databases = ""`, and the column
+  reads back as NaN from CSV.
+
+**Symptom:** after running `scripts/merge_gap_fill.py`, the
+`source_databases` column in `results/<slug>_bibliography.csv` (and
+the downstream embedded + labeled corpora) is empty for every row.
+The .bib file is unaffected (it's not rewritten by the merge).
+
+**Affected projects:** all four pre-litsweep siblings (`native-sand`,
+`reworming-lit`, `microtexture-lit-search`, `worm-tea-lit`) and
+anything else scaffolded before 2026-04-30. `worm-tea-lit` is the
+confirmed case — see "Recovery" below.
+
+**Fix going forward:** copy `dedup.py` and `scripts/merge_gap_fill.py`
+from upstream litsweep. The current `merge_gap_fill.py` ships with a
+guardrail (`_check_source_coverage`) that aborts with a clear error
+before overwriting the main CSV if it detects this exact collapse, so
+the next person to gap-fill won't lose data silently.
+
+```bash
+cp /path/to/litsweep/dedup.py                       ./dedup.py
+cp /path/to/litsweep/scripts/merge_gap_fill.py      ./scripts/
+cp /path/to/litsweep/scripts/recover_source_databases_from_bib.py ./scripts/
+```
+
+### Recovery for already-affected projects
+
+Run the recovery script. It parses the .bib's `note = {…}` field
+(written before the bug zeroed out the CSV) and back-fills the
+`source_databases` column on every CSV that still has a matching DOI:
+
+```bash
+cd /path/to/<sibling-project>
+python scripts/recover_source_databases_from_bib.py
+# or preview first:
+python scripts/recover_source_databases_from_bib.py --dry-run
+```
+
+Auto-detects `results/<slug>_bibliography.bib` and updates
+`<slug>_bibliography.csv`, `<slug>_bibliography_embedded.csv`, and
+`<slug>_labeled_corpus.csv` if present. Backs each up to
+`*.pre_source_recovery.bak` once before writing.
+
+**Limit:** only rows whose DOIs appear in the .bib are recovered. Any
+rows added to the CSV *after* the .bib was last written (e.g. a later
+gap-fill harvest) stay empty and are reported. In `worm-tea-lit` this
+left ~3,300 of ~34,600 rows unrecovered. To recover those, you'd need
+the bibliography from the gap-fill `--output` directory (often deleted
+per `DISK_HYGIENE.md`); if it's gone, accept the partial recovery.
+
 ## What's available to back-port (as of 2026-04-30)
 
 | Change | Where | Why it matters |

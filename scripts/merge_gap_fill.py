@@ -43,6 +43,59 @@ import pandas as pd
 logger = logging.getLogger("merge_gap_fill")
 
 
+def _check_source_coverage(
+    main: pd.DataFrame, merged: pd.DataFrame
+) -> str | None:
+    """Return a guardrail error message if source_databases collapsed.
+
+    Catches the byte-copy-divergence scenario diagnosed in worm-tea-lit:
+    if a project's local ``dedup.py`` predates upstream commit
+    ``780588c`` ("dedup: read existing source_databases column when
+    available"), the local dedup reads only ``source_database``
+    (singular) from inputs. Already-deduped frames don't have that
+    column — they have ``source_databases`` (plural) — so every output
+    row gets ``source_databases = ""`` and provenance is silently
+    wiped.
+
+    The check fires only when ``main`` had non-trivial coverage to
+    begin with (i.e. the bug-state isn't already-present upstream) and
+    the merged frame's coverage drops far enough that legitimate
+    dedup-overlap can't account for it.
+
+    Args:
+        main: Pre-merge main bibliography.
+        merged: Post-dedup merged bibliography.
+
+    Returns:
+        Error message if collapse detected; ``None`` otherwise.
+    """
+    if "source_databases" not in main.columns:
+        return None
+    main_filled = (
+        main["source_databases"].fillna("").astype(str).str.len() > 0
+    ).sum()
+    if main_filled == 0:
+        return None
+    merged_filled = (
+        merged["source_databases"].fillna("").astype(str).str.len() > 0
+    ).sum()
+    main_cov = main_filled / len(main)
+    merged_cov = merged_filled / len(merged) if len(merged) else 0.0
+    if main_cov >= 0.5 and merged_cov < 0.2:
+        return (
+            f"source_databases coverage collapsed during merge: "
+            f"{main_cov:.0%} of main rows had a source ({main_filled}/{len(main)}) "
+            f"but only {merged_cov:.0%} of merged rows do "
+            f"({merged_filled}/{len(merged)}). "
+            "This usually means this project's local dedup.py predates "
+            "upstream commit 780588c (\"dedup: read existing "
+            "source_databases column when available\"). To fix, byte-copy "
+            "the upstream dedup.py and re-run; see "
+            "docs/BACKPORTING_NEW_SOURCES.md (\"Critical: dedup idempotence\")."
+        )
+    return None
+
+
 def _autodetect_csv(directory: Path) -> Path:
     candidates = sorted(directory.glob("*_bibliography.csv"))
     if len(candidates) == 1:
@@ -104,6 +157,12 @@ def merge(
 
     net_new = len(merged) - len(main)
     logger.info("net new records:    %d", net_new)
+
+    coverage_err = _check_source_coverage(main, merged)
+    if coverage_err is not None:
+        raise SystemExit(
+            f"Aborting before overwriting {main_csv}: {coverage_err}"
+        )
 
     if not dry_run:
         merged.to_csv(main_csv, index=False)

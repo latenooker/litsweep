@@ -100,6 +100,11 @@ TEMPLATED_FILES = [
     # merge_gap_fill.py merges a sibling-output dedup-merge into the
     # main bibliography (used for WoS-Expanded gap-fills, etc.).
     "scripts/merge_gap_fill.py",
+    # recover_source_databases_from_bib.py is the recovery tool for
+    # projects whose source_databases column got wiped by an old
+    # local dedup.py running through merge_gap_fill (see
+    # docs/BACKPORTING_NEW_SOURCES.md, "Critical: dedup idempotence").
+    "scripts/recover_source_databases_from_bib.py",
 ]
 
 
