@@ -70,8 +70,24 @@ def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
     return inter / len(a | b)
 
 
-def dedup(df: pd.DataFrame, title_threshold: float = 0.85) -> pd.DataFrame:
+def dedup(
+    df: pd.DataFrame,
+    title_threshold: float = 0.85,
+    min_title_tokens: int = 6,
+) -> pd.DataFrame:
     """Deduplicate a results DataFrame on DOI then title similarity.
+
+    Three passes, in order, against each incoming record:
+
+    1. **DOI exact match** (with prefix-stripping normalization).
+    2. **Cross-DOI title near-match** — preprint ↔ journal version,
+       versioned DOIs (``...v1`` vs ``...v2``), dual-publisher
+       registrations of the same work. Bounded by ``min_title_tokens``
+       and language bucketing to suppress false positives on generic
+       short titles ("Glossary", "Reply on RC2", "Summary for
+       Policymakers").
+    3. **No-DOI title near-match** — same Jaccard pass, applied to
+       records that lack a DOI, with the same min-token gate.
 
     The input DataFrame must contain at least: ``doi``, ``title``,
     ``source_database`` columns. Other columns are preserved by keeping
@@ -81,8 +97,13 @@ def dedup(df: pd.DataFrame, title_threshold: float = 0.85) -> pd.DataFrame:
 
     Args:
         df: Combined results from all sources.
-        title_threshold: Jaccard similarity above which two no-DOI records
-            are considered duplicates. Defaults to 0.85 per spec.
+        title_threshold: Jaccard similarity above which two records are
+            considered duplicates. Defaults to 0.85 per spec.
+        min_title_tokens: Minimum stopword-stripped token count for a
+            title to participate in title-similarity matching. Records
+            below this are kept as-is even if their titles match
+            verbatim — protects against generic-title false positives.
+            Defaults to 6.
 
     Returns:
         A new DataFrame with duplicates merged.
@@ -123,19 +144,43 @@ def dedup(df: pd.DataFrame, title_threshold: float = 0.85) -> pd.DataFrame:
             return {singular}
         return set()
 
+    def _looks_corrupted_authors(s: object) -> bool:
+        """Detect the CORE / OpenAlex bibliography-as-authors corruption.
+
+        Trigger: > 25 semicolon-separated entries. Rare false positives
+        on real consortium papers (~30+ authors) get re-promoted from a
+        sibling source if one exists, otherwise stay as-is.
+        """
+        if not isinstance(s, str) or not s.strip():
+            return True  # treat empty as "open to replacement"
+        return len([a for a in s.split(";") if a.strip()]) > 25
+
+    def _merge_into(kept_idx: int, row: pd.Series, sources: set[str]) -> None:
+        """Fold ``row`` into the existing record at ``kept_idx``."""
+        sources_per_row[kept_idx].update(sources)
+        # Prefer the new row's authors if the kept row's
+        # authors look corrupted but the new row's don't.
+        kept_auth = out_rows[kept_idx].get("authors")
+        new_auth = row.get("authors")
+        if (_looks_corrupted_authors(kept_auth)
+                and isinstance(new_auth, str) and new_auth.strip()
+                and not _looks_corrupted_authors(new_auth)):
+            out_rows[kept_idx]["authors"] = new_auth
+
     for _, row in df.iterrows():
         norm_doi = row["_norm_doi"]
         sources = _row_sources(row)
-        if norm_doi:
-            if norm_doi in doi_index:
-                sources_per_row[doi_index[norm_doi]].update(sources)
-                continue
-            doi_index[norm_doi] = len(out_rows)
-            out_rows.append(row.to_dict())
-            sources_per_row.append(set(sources))
+
+        # Pass 1: DOI exact match.
+        if norm_doi and norm_doi in doi_index:
+            _merge_into(doi_index[norm_doi], row, sources)
             continue
 
-        # No DOI — try title-similarity match within language bucket.
+        # Pass 2 / 3: title-similarity match within a language bucket.
+        # Runs whether or not the row has a DOI — catches preprint vs
+        # journal-version pairs, versioned DOIs, and dual-publisher
+        # dual-registrations of the same work that would otherwise slip
+        # past the DOI-exact pass.
         lang_raw = row.get("language")
         if lang_raw is None or (isinstance(lang_raw, float) and pd.isna(lang_raw)):
             lang = ""
@@ -143,19 +188,27 @@ def dedup(df: pd.DataFrame, title_threshold: float = 0.85) -> pd.DataFrame:
             lang = str(lang_raw).lower()
         toks = _title_tokens(row.get("title"))
         match_idx: int | None = None
-        if toks:
+        if len(toks) >= min_title_tokens:
             for cand_toks, cand_idx in title_buckets[lang]:
                 if _jaccard(toks, cand_toks) >= title_threshold:
                     match_idx = cand_idx
                     break
         if match_idx is not None:
-            sources_per_row[match_idx].update(sources)
+            _merge_into(match_idx, row, sources)
+            # Register this row's DOI against the existing record so a
+            # third record sharing this DOI also collapses correctly
+            # (covers preprint + journal + crossref triples).
+            if norm_doi and norm_doi not in doi_index:
+                doi_index[norm_doi] = match_idx
             continue
 
+        # New record: register in DOI index and the title bucket.
         idx = len(out_rows)
         out_rows.append(row.to_dict())
         sources_per_row.append(set(sources))
-        if toks:
+        if norm_doi:
+            doi_index[norm_doi] = idx
+        if len(toks) >= min_title_tokens:
             title_buckets[lang].append((toks, idx))
 
     out = pd.DataFrame(out_rows).drop(columns=["_norm_doi"], errors="ignore")
