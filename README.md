@@ -1,7 +1,7 @@
 # litsweep
 
 Canonical scaffold for multilingual literature-search projects:
-harvest from up to 8 bibliographic databases → DOI/Jaccard dedup →
+harvest from up to 13 bibliographic databases → DOI/Jaccard dedup →
 local Ollama BGE-M3 embedding + per-anchor cosine filtering →
 strict-JSON LLM labeling via the Stanford gateway.
 
@@ -53,7 +53,7 @@ SYSTEM_PROMPT) per [docs/DEPLOYING_A_NEW_SEARCH.md](docs/DEPLOYING_A_NEW_SEARCH.
 
 ```
 litsweep/
-├── api_clients.py             # 8-source bibliographic API wrappers (shared)
+├── api_clients.py             # 13-source bibliographic API wrappers (shared)
 ├── dedup.py                   # DOI + Jaccard title-similarity dedup (shared)
 ├── litsweep_search.py         # orchestrator template (renamed at scaffold)
 ├── requirements.txt           # pinned deps
@@ -73,7 +73,8 @@ litsweep/
 └── docs/
     ├── DEPLOYING_A_NEW_SEARCH.md
     ├── DIRECTORY_STRUCTURE.md
-    └── DISK_HYGIENE.md
+    ├── DISK_HYGIENE.md
+    └── BACKPORTING_NEW_SOURCES.md
 ```
 
 ## Pipeline at a glance
