@@ -73,6 +73,8 @@ THIS_PROJECT = Path(__file__).resolve().parent.parent
 SHARED_INFRA = [
     "api_clients.py",
     "dedup.py",
+    "label_backends.py",
+    "embed_backends.py",
     "requirements.txt",
     ".gitignore",
 ]
