@@ -11,6 +11,31 @@ heavy artifacts living on `rclone:su-drive`).
 
 ---
 
+## End-of-run cleanup is now automated
+
+As of the swappable-backends/layout work, **`<slug>_search.py`
+runs `scripts/disk_hygiene.py` automatically at the end of every
+successful run** (disable with `--no-cleanup`). It packs
+`results/raw/*.json` into `results/archive/raw_archive.parquet`
+(zstd-9), verifies the round-trip and logs the md5, then deletes
+`results/raw/`. The cleanup is best-effort and never fatal: a
+failed archive leaves `results/raw/` in place and only warns.
+
+Manual / standalone use (e.g. after a gap-fill harvest, or to
+keep `results/raw/` around):
+
+```bash
+python scripts/disk_hygiene.py --results results            # archive + delete raw/
+python scripts/disk_hygiene.py --results results --no-delete # archive but keep raw/
+```
+
+The per-stage rclone-push guidance below is still manual — only
+the `raw/` → parquet archiving step is now automatic. The hand
+commands in *After harvest* document what the automatic step
+does and remain the reference for one-off / recovery work.
+
+---
+
 ## Per-stage hygiene
 
 ### After harvest (`<slug>_search.py`)
@@ -24,7 +49,10 @@ The harvest writes:
 Push the bibliography CSV+BIB to rclone immediately so we have the
 canonical post-dedup state checkpointed, then **archive raw/ to a
 parquet** before doing anything else. Parquet+zstd compresses the
-JSON cache ~10×.
+JSON cache ~10×. The raw/ → parquet step is now done
+automatically at the end of a successful `<slug>_search.py` run
+(see *End-of-run cleanup* above); the commands below are the
+manual equivalent for recovery or `--no-cleanup` runs.
 
 ```bash
 DATE=$(date +%F)
@@ -42,16 +70,17 @@ for fp in pathlib.Path('results/raw').glob('*.json'):
     rows.append({'source': fp.stem.split('__', 1)[0],
                  'query':  fp.stem.split('__', 1)[-1],
                  'payload_json': fp.read_text()})
+pathlib.Path('results/archive').mkdir(exist_ok=True)
 pd.DataFrame(rows).to_parquet(
-    'results/raw_archive.parquet',
+    'results/archive/raw_archive.parquet',
     compression='zstd', compression_level=9)
 print(f'archived {len(rows)} JSON files')
 "
 
 # 3. Push the parquet, then verify checksum, then delete raw/
-rclone copy results/raw_archive.parquet su-drive:${SLUG}/${DATE}/
+rclone copy results/archive/raw_archive.parquet su-drive:${SLUG}/${DATE}/
 rclone hashsum md5 su-drive:${SLUG}/${DATE}/raw_archive.parquet
-md5 results/raw_archive.parquet  # macOS; sha256sum on Linux
+md5 results/archive/raw_archive.parquet  # macOS; sha256sum on Linux
 # if both match:
 rm -rf results/raw
 ```
@@ -108,7 +137,7 @@ For an **active project** (under iteration):
 - Latest `*_bibliography.csv`, `*_embedded.csv`, `*_labeled_corpus.csv`
 - Latest `*.embeddings.npy` (only if doing embed-dependent work this
   week; otherwise keep on rclone)
-- Latest `raw_archive.parquet` (compact, ~50-200 MB)
+- Latest `results/archive/raw_archive.parquet` (compact, ~50-200 MB)
 
 Delete:
 
@@ -134,7 +163,7 @@ su-drive:
     └── YYYY-MM-DD/                 # one snapshot per major stage
         ├── <slug>_bibliography.csv
         ├── <slug>_bibliography.bib
-        ├── raw_archive.parquet
+        ├── raw_archive.parquet         # pushed flat from results/archive/raw_archive.parquet
         ├── <slug>_bibliography_embedded.csv
         ├── <slug>_bibliography_embedded.embeddings.npy
         ├── <slug>_bibliography_embedded.embeddings.ids.txt
@@ -153,7 +182,7 @@ Rough sizes for a 30k-record project:
 | Artifact | Uncompressed | Compressed | Lives where |
 |---|--:|--:|---|
 | `raw/` JSON cache | 1.5-2.5 GB | — | local during stage, then deleted |
-| `raw_archive.parquet` (zstd) | — | 100-200 MB | rclone + local |
+| `archive/raw_archive.parquet` (zstd) | — | 100-200 MB | rclone + local |
 | `<slug>_bibliography.csv` | 50-150 MB | — | rclone + local |
 | `<slug>_bibliography_embedded.csv` | 60-180 MB | — | rclone + local |
 | `*.embeddings.npy` (float32) | 80-150 MB | — | rclone + local (during use) |
@@ -170,19 +199,29 @@ CSV).
 
 ## Routine cleanup script
 
-A `scripts/disk_hygiene.py` (TODO: write once the patterns stabilize)
-should automate:
+`scripts/disk_hygiene.py` now exists and handles the
+`results/raw/` → `results/archive/raw_archive.parquet` archive
+(zstd-9, md5-verified) and the `results/raw/` deletion. It runs
+automatically at the end of every successful `<slug>_search.py`
+run (disable with `--no-cleanup`), or standalone:
 
-1. Detect stale `results/raw/` (parquet exists and is newer): delete.
-2. Detect closed checkpoints (final labeled CSV exists and is newer
-   than the checkpoint dir): delete.
-3. Compress and rclone-push any new `*.csv` / `*.npy` / `*.parquet`
-   that doesn't have a matching `su-drive:<slug>/<date>/<file>`.
-4. Print a per-project disk report.
+```bash
+python scripts/disk_hygiene.py --results results            # archive + delete raw/
+python scripts/disk_hygiene.py --results results --no-delete # archive but keep raw/
+```
 
-Until that script exists, run the per-stage commands above by hand
-after every successful pipeline stage. The cost of forgetting is
-~1 GB per project per harvest.
+Closed-checkpoint deletion (final labeled CSV exists and is
+newer than the checkpoint dir) happens automatically when the
+labeled corpus is written. The rclone-push of new
+`*.csv` / `*.npy` / `*.parquet` and the per-project disk report
+are still manual — run the per-stage rclone commands above by
+hand after every successful pipeline stage. The cost of
+forgetting the rclone push is ~1 GB per project per harvest.
+
+To migrate an older project's `results/` into the new subdir
+layout (logs/, archive/, gapfills/, pilots/, analysis/), use
+`python scripts/migrate_layout.py <project_root>` (dry-run) then
+re-run with `--apply`.
 
 ---
 

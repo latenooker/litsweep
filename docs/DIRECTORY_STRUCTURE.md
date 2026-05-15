@@ -16,6 +16,8 @@ my-search-lit/                       # repo root; one project = one repo
 ├── requirements.txt                  # pinned deps (byte-copied from litsweep)
 ├── api_clients.py                    # shared infra (byte-copied)
 ├── dedup.py                          # shared infra (byte-copied)
+├── label_backends.py                 # shared infra: label backend registry (stanford, ollama)
+├── embed_backends.py                 # shared infra: embed backend registry (ollama)
 ├── <slug>_search.py                  # orchestrator: queries -> dedup -> augment
 ├── queries.py                        # ★ topic-specific: search strings per source
 ├── vocab.py                          # ★ topic-specific: VOCAB_AXES + TOPIC_PRESENCE
@@ -25,6 +27,8 @@ my-search-lit/                       # repo root; one project = one repo
 │   ├── embed_diagnostic.py
 │   ├── merge_gap_fill.py
 │   ├── backfill_abstracts.py
+│   ├── disk_hygiene.py              # parquet-archive results/raw/ -> archive/
+│   ├── migrate_layout.py            # opt-in: tidy an old project's results/
 │   ├── citation_chase.py
 │   ├── wos_gap_fill.py
 │   ├── wos_expanded_ping.py
@@ -40,19 +44,34 @@ my-search-lit/                       # repo root; one project = one repo
 │   └── session_logs/
 │       └── claude_session_log_YYYY-MM-DD.md
 ├── results/                          # all gitignored; see DISK_HYGIENE.md
-│   ├── <slug>_bibliography.csv               # main corpus (committed via rclone, not git)
+│   ├── <slug>_bibliography.csv               # canonical pipeline (never moves)
 │   ├── <slug>_bibliography.bib               # BibTeX export
 │   ├── <slug>_bibliography_embedded.csv      # + embed_score, embed_top_anchor
 │   ├── <slug>_bibliography_embedded.embeddings.npy   # 1024-d float32 matrix
 │   ├── <slug>_bibliography_embedded.embeddings.ids.txt
-│   ├── <slug>_labeled_corpus.csv             # + 13 *_llm columns
-│   ├── <slug>_labeled_corpus.checkpoints/    # per-50-row chunks
-│   ├── raw/                                  # per-query JSON cache (often >1 GB)
-│   ├── raw_archive.parquet                   # zstd-compressed cache (10x smaller)
-│   ├── *.log                                 # harvest, embed, label logs
-│   └── errors.log                            # API failures
+│   ├── <slug>_labeled_corpus.csv             # the deliverable
+│   ├── <slug>_labeled_corpus.checkpoints/    # per-50-row chunks (auto-deleted on successful write)
+│   ├── raw/                                  # per-query JSON cache (parquet-archived + deleted at end of run unless --no-cleanup)
+│   ├── gapfills/<name>/                       # gap-fill chains (bibliography.csv, bibliography_embedded.csv, labeled.csv)
+│   ├── pilots/                                # smoke-test outputs (e.g. pilot50_labeled.csv)
+│   ├── analysis/                              # derived artifacts (gap_matrix, cross-project bridges, *.png/*.pdf)
+│   ├── archive/                               # raw_archive.parquet, *.bak files
+│   └── logs/                                  # harvest/embed/label logs, errors.log
 └── tests/                                    # (optional) project-specific tests
 ```
+
+The top-level canonical filenames inside `results/`
+(`<slug>_bibliography*`, `<slug>_labeled_corpus*`, the
+`*.embeddings.*` matrices, the `*.checkpoints/` dir) **never
+change** — cross-project tools hardcode them. The
+`gapfills/`, `pilots/`, `analysis/`, `archive/`, and `logs/`
+subdirs are *additive*: new projects get them from the
+scaffold; existing pre-layout projects adopt them by running
+`python scripts/migrate_layout.py <project_root>` (dry-run,
+prints the planned moves) and then re-running with `--apply`.
+The migration only moves cruft (`*.log`, `*.bak`,
+`raw_archive*.parquet`, pilot/analysis/gap-fill CSVs) into the
+new subdirs; it never touches the canonical filenames above.
 
 ★ = the four files the user actually edits per project. Everything
 else is litsweep infrastructure.
@@ -70,10 +89,10 @@ else is litsweep infrastructure.
 | `results/<slug>_bibliography_embedded.csv` | | ✓ | larger, +embedded scores |
 | `results/<slug>_labeled_corpus.csv` | | ✓ | the deliverable |
 | `results/*.embeddings.npy` | | ✓ | expensive to recompute (Ollama) |
-| `results/raw_archive.parquet` | | ✓ | compressed raw cache |
-| `results/raw/*.json` | | | delete after archiving to parquet |
-| `results/*.log` | | | keep until next major rerun |
-| `results/*.checkpoints/` | | | delete after final labeled CSV is written |
+| `results/archive/raw_archive.parquet` | | ✓ | compressed raw cache |
+| `results/raw/*.json` | | | auto-archived to parquet + deleted at end of run |
+| `results/logs/*.log` | | | keep until next major rerun |
+| `results/*.checkpoints/` | | | auto-deleted after final labeled CSV is written |
 
 ## Why this shape
 

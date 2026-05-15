@@ -39,6 +39,8 @@ results/errors.log
 results/run.log
 results/labeling_*.log
 results/run_*.log
+results/logs/*.log
+results/logs/*.log.*
 results/*_bibliography.csv
 results/*_bibliography.bib
 results/*_wos_screened.csv
@@ -49,6 +51,11 @@ results/*_embedded.embeddings.ids.txt
 results/*_labeled*.csv
 results/*_labeled*.checkpoints/
 !results/raw/.gitkeep
+!results/logs/.gitkeep
+results/archive/*.parquet
+results/archive/*.bak
+results/archive/*.bak.*
+!results/archive/.gitkeep
 
 # Obsidian vault config
 .obsidian/

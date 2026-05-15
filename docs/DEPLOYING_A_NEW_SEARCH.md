@@ -34,8 +34,18 @@ work and depend on your topic.
 - **Python 3.11+** with `pip`, ideally in a per-project venv.
 - **Ollama** running locally with `bge-m3` pulled
   (`ollama pull bge-m3`).
+- **A labeling backend.** `scripts/label_with_stanford.py` takes
+  `--label-backend {stanford,ollama}` (default `stanford`):
+  - `stanford` — the Stanford AI gateway; needs `STANFORD_API_KEY`
+    in the environment. The default path.
+  - `ollama` — local Ollama with a chat model pulled (e.g.
+    `ollama pull llama3.1`); **no Stanford key required**. Slower
+    but fully offline / zero API cost.
+  Pick one; you don't need `STANFORD_API_KEY` if you label with
+  `--label-backend ollama`.
 - **API keys in your shell environment** (export from `~/.zshrc`):
-  - `STANFORD_API_KEY` — gateway for label_with_stanford.
+  - `STANFORD_API_KEY` — gateway for label_with_stanford
+    (only needed for the default `--label-backend stanford`).
   - `WOS_EXPANDED_API_KEY` — Clarivate WoS Expanded (paid).
   - `WOS_API_KEY` — WoS Starter (free tier, 50/day).
   - `BASE_API_KEY` — global thesis aggregator (free).
@@ -260,13 +270,15 @@ is unacceptable.
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# Verify env
+# Verify env (STANFORD_API_KEY only needed for --label-backend stanford)
 env | grep -E "STANFORD_API_KEY|WOS_|BASE_API_KEY"
 
 # Stage 1: harvest + dedup (writes results/<slug>_bibliography.csv + .bib)
 python <slug>_search.py --email you@example.com
 
 # Stage 2: embed (writes results/<slug>_bibliography_embedded.csv + .npy + .ids.txt)
+# --embed-backend defaults to ollama (only backend today; flag reserved
+# for future backends).
 python scripts/embed_filter.py \
     --csv results/<slug>_bibliography.csv \
     --out results/<slug>_bibliography_embedded.csv
@@ -287,6 +299,16 @@ python scripts/label_with_stanford.py \
     --csv results/<slug>_bibliography_embedded.csv \
     --out results/<slug>_labeled_corpus.csv \
     --min-score 0.45
+
+# Alternative: label with local Ollama instead of the Stanford gateway
+python scripts/label_with_stanford.py \
+    --csv results/<slug>_bibliography_embedded.csv \
+    --out results/<slug>_labeled_corpus.csv \
+    --label-backend ollama \
+    --ollama-host http://localhost:11434 \
+    --model llama3.1:8b-instruct-q4_K_M \
+    --min-score 0.45
+    # add --min-interval-s 2 if Ollama starts dropping/refusing requests
 ```
 
 Wallclock for a typical 10k–20k record corpus: ~1 minute harvest per
@@ -375,7 +397,11 @@ After the first labeled-corpus pass:
    pattern).
 3. **Re-run only the new queries.** `scripts/wos_gap_fill.py` is the
    reusable harness; it fetches, embeds, labels, and writes a side-
-   channel CSV without touching the main corpus.
+   channel CSV without touching the main corpus. Note: gap-fill
+   harvests still write to a flat `results/` path by default; pass
+   an explicit `--out` (for `wos_gap_fill.py`) or `--gap-dir` (for
+   `merge_gap_fill.py`), or run `scripts/migrate_layout.py`
+   afterward to file them under `results/gapfills/`.
 4. **Merge when satisfied.** Append the gap-fill rows to
    `<slug>_labeled_corpus.csv` with DOI dedup; re-run embed_filter on
    the merged corpus to extend the embedding matrix; re-run any
@@ -395,26 +421,36 @@ rclone copy results/<slug>_bibliography_embedded.embeddings.npy su-drive:<slug>/
 rclone hashsum md5 su-drive:<slug>/$(date +%F)/<slug>_labeled_corpus.csv  # verify
 ```
 
-For the per-query JSON cache in `results/raw/`, parquet-archive
-before deleting (~10× compression):
+The per-query JSON cache in `results/raw/` is **archived
+automatically**: `<slug>_search.py` runs `scripts/disk_hygiene.py`
+at the end of every successful run (`--cleanup`, on by default),
+which parquet-archives `results/raw/` to
+`results/archive/raw_archive.parquet` (zstd-9, md5-verified) and
+then deletes `results/raw/`. Pass `--no-cleanup` to keep
+`results/raw/` (e.g. before a backfill or gap-fill that re-reads
+the JSON cache). To archive manually or after a `--no-cleanup`
+run:
 
 ```bash
-python -c "
-import pandas as pd, json, pathlib
-rows = []
-for fp in pathlib.Path('results/raw').glob('*.json'):
-    rows.append({'source': fp.stem.split('__', 1)[0],
-                 'query': fp.stem.split('__', 1)[-1],
-                 'payload_json': fp.read_text()})
-pd.DataFrame(rows).to_parquet(
-    'results/raw_archive.parquet', compression='zstd', compression_level=9)
-"
-rclone copy results/raw_archive.parquet su-drive:<slug>/$(date +%F)/
-rm -rf results/raw   # only after the upload verifies
+python scripts/disk_hygiene.py --results results            # archive + delete raw/
+python scripts/disk_hygiene.py --results results --no-delete # archive but keep raw/
+rclone copy results/archive/raw_archive.parquet su-drive:<slug>/$(date +%F)/
 ```
 
-The shared `.gitignore` template already excludes `results/raw_*/` and
-`results/raw_*.parquet` so you don't accidentally check archives in.
+The shared `.gitignore` template already excludes `results/raw_*/`
+and `results/raw_*.parquet` so you don't accidentally check
+archives in. See [DISK_HYGIENE.md](DISK_HYGIENE.md) for the full
+norms.
+
+> **Migrating an older project's layout.** Projects scaffolded
+> before the subdir layout (`results/logs/`, `archive/`,
+> `gapfills/`, `pilots/`, `analysis/`) can adopt it with
+> `python scripts/migrate_layout.py <project_root>` (dry-run,
+> prints the planned moves) then re-run with `--apply`. It only
+> moves cruft (logs, `.bak`, `raw_archive*.parquet`,
+> pilot/analysis/gap-fill CSVs) and never touches the canonical
+> `*_bibliography*` / `*_labeled_corpus*` / embeddings /
+> checkpoint files.
 
 ## Step 6 — (optional) cross-project bridge
 

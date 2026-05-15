@@ -1,4 +1,4 @@
-"""Label abstracts via the Stanford AI API gateway (OpenAI-compatible).
+"""Label abstracts via a pluggable LLM backend (Stanford gateway or local Ollama).
 
 Reads a CSV of records (typically the high-`embed_score` survivors from
 ``embed_filter.py``), sends ``title + abstract`` to a chat-completion
@@ -20,9 +20,11 @@ avoid colliding with screener-derived columns of the same name)::
 Checkpoints to ``--checkpoint-dir`` every ``--chunk-size`` rows so a
 Ctrl-C costs at most one chunk. Re-running the same command resumes.
 
-Backend: Stanford AI API gateway. Default base URL
-``https://aiapi-prod.stanford.edu/v1``; default model
-``gemini-2.0-flash-lite-001``. Set ``STANFORD_API_KEY`` env var.
+Backend: selected with ``--label-backend`` (default ``stanford``).
+The ``stanford`` backend needs ``STANFORD_API_KEY`` and defaults to
+model ``gemini-2.0-flash-lite-001`` at ``https://aiapi-prod.stanford.edu/v1``;
+the ``ollama`` backend needs a local Ollama daemon with the chat model
+pulled (e.g. ``ollama pull llama3.1``).
 
 Usage::
 
@@ -41,30 +43,27 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
+import shutil
 import sys
-import time
-import urllib.error
-import urllib.request
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 from tqdm import tqdm
 
+# Make label_backends importable when running this script from anywhere.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import label_backends  # noqa: E402
+
 logger = logging.getLogger("label_with_stanford")
 
 STANFORD_DEFAULT_URL = "https://aiapi-prod.stanford.edu/v1"
 STANFORD_DEFAULT_MODEL = "gemini-2.0-flash-lite-001"
-REQUEST_TIMEOUT_S = 60
-MAX_RETRIES = 3
-# 429s get their own counter so a temporarily-throttled gateway doesn't
-# burn the regular MAX_RETRIES budget. Backoff is bounded to keep a
-# permanently broken endpoint from looping forever.
-MAX_429_RETRIES = 8
+OLLAMA_DEFAULT_HOST = "http://localhost:11434"
+OLLAMA_DEFAULT_MODEL = "llama3.1:8b-instruct-q4_K_M"
 
 SYSTEM_PROMPT = """\
 You are a soil-science / regolith-geology research librarian. Given the \
@@ -138,67 +137,8 @@ Rules:
 
 
 # ---------------------------------------------------------------------------
-# Stanford API call
+# Project-schema-tied error label
 # ---------------------------------------------------------------------------
-
-
-# Module-level monotonic clock for the optional client-side rate
-# limiter (see --min-interval-s). Initialised the first time
-# ``call_stanford`` is hit; threading not required because the
-# orchestrator labels rows serially.
-_LAST_REQUEST_T: float = 0.0
-
-
-@dataclass
-class StanfordConfig:
-    """Stanford gateway configuration."""
-
-    api_key: str
-    api_url: str = STANFORD_DEFAULT_URL
-    model: str = STANFORD_DEFAULT_MODEL
-    temperature: float = 0.0
-    max_tokens: int = 400
-    # Minimum wall-clock seconds between successive ``call_stanford``
-    # invocations. ``0`` (default) leaves the labeler reactive: only
-    # back off when the gateway returns 429. Set to e.g. ``1.5`` to
-    # pre-throttle below the gateway's per-second quota and avoid the
-    # bursty 429s seen in worm-tea-lit's 31k-row run on 2026-04-30
-    # (~20 events sleeping 8-16 s each, total ~3 min lost).
-    min_interval_s: float = 0.0
-
-
-def check_stanford(cfg: StanfordConfig) -> None:
-    """Probe the gateway. Logs available models; non-fatal if list fails."""
-    if not cfg.api_key:
-        raise SystemExit(
-            "Stanford API key not set. Pass --api-key or set STANFORD_API_KEY."
-        )
-    url = f"{cfg.api_url.rstrip('/')}/models"
-    req = urllib.request.Request(
-        url, headers={"Authorization": f"Bearer {cfg.api_key}"}
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            body = json.loads(resp.read())
-        models = [m.get("id") for m in body.get("data", []) if m.get("id")]
-        logger.info("Stanford reachable. %d models available.", len(models))
-        if cfg.model not in models:
-            logger.warning(
-                "Model %r not in list; will attempt anyway. Sample: %s",
-                cfg.model, models[:5],
-            )
-    except Exception as exc:  # pragma: no cover - probe is best-effort
-        logger.warning("Could not list Stanford models (probe only): %s", exc)
-
-
-def _strip_code_fence(text: str) -> str:
-    """Drop ```json ... ``` fences if the model added them despite instructions."""
-    s = text.strip()
-    if s.startswith("```"):
-        s = s.split("\n", 1)[1] if "\n" in s else s
-        if s.endswith("```"):
-            s = s.rsplit("```", 1)[0]
-    return s.strip()
 
 
 def _error_label(reason: str) -> dict[str, Any]:
@@ -214,87 +154,6 @@ def _error_label(reason: str) -> dict[str, Any]:
         "is_review": False,
         "rationale": reason[:200],
     }
-
-
-def call_stanford(prompt: str, cfg: StanfordConfig) -> dict[str, Any]:
-    """Call Stanford gateway; return parsed JSON or an error label.
-
-    If ``cfg.min_interval_s > 0``, sleeps until at least that much
-    monotonic time has passed since the previous successful submission.
-    The pre-throttle wraps the entire retry loop, so a 429-driven
-    sleep doesn't double up with the client-side cap.
-    """
-    global _LAST_REQUEST_T
-    if cfg.min_interval_s > 0:
-        elapsed = time.monotonic() - _LAST_REQUEST_T
-        if elapsed < cfg.min_interval_s:
-            time.sleep(cfg.min_interval_s - elapsed)
-    _LAST_REQUEST_T = time.monotonic()
-
-    payload = json.dumps({
-        "model": cfg.model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": cfg.temperature,
-        "max_tokens": cfg.max_tokens,
-    }).encode("utf-8")
-
-    url = f"{cfg.api_url.rstrip('/')}/chat/completions"
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {cfg.api_key}",
-        },
-    )
-
-    attempt = 0
-    rate_limit_attempts = 0
-    while attempt < MAX_RETRIES:
-        try:
-            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_S) as resp:
-                body = json.loads(resp.read())
-            content = body["choices"][0]["message"]["content"]
-            return json.loads(_strip_code_fence(content))
-        except urllib.error.HTTPError as exc:
-            err_body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
-            if exc.code == 429:
-                rate_limit_attempts += 1
-                if rate_limit_attempts >= MAX_429_RETRIES:
-                    return _error_label(
-                        f"HTTP 429 after {MAX_429_RETRIES} retries"
-                    )
-                # Backoff: 4, 8, 16, 30, 60, 60, 60, 60s. Doesn't burn
-                # the regular MAX_RETRIES budget — a throttled gateway
-                # is a transient signal, not an error to give up on.
-                wait = min(2 ** (rate_limit_attempts + 1), 60)
-                logger.warning("429 rate limit (%d/%d), sleeping %ds",
-                               rate_limit_attempts, MAX_429_RETRIES, wait)
-                time.sleep(wait)
-                continue  # do NOT increment attempt
-            elif attempt < MAX_RETRIES - 1:
-                logger.warning("HTTP %d (attempt %d): %s",
-                               exc.code, attempt + 1, err_body[:200])
-                time.sleep(2 ** attempt)
-            else:
-                return _error_label(f"HTTP {exc.code}: {err_body[:200]}")
-        except (json.JSONDecodeError, KeyError, IndexError) as exc:
-            if attempt < MAX_RETRIES - 1:
-                logger.warning("parse error attempt %d: %s", attempt + 1, exc)
-                time.sleep(1)
-            else:
-                return _error_label(f"parse: {exc}")
-        except Exception as exc:  # pragma: no cover - defensive
-            if attempt < MAX_RETRIES - 1:
-                logger.warning("attempt %d failed: %s", attempt + 1, exc)
-                time.sleep(2 ** attempt)
-            else:
-                return _error_label(str(exc))
-        attempt += 1
-    return _error_label("max retries exhausted")
 
 
 # ---------------------------------------------------------------------------
@@ -391,9 +250,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--limit", type=int, default=None,
                         help="Limit number of rows labeled (smoke-test).")
-    parser.add_argument("--api-key", default=os.environ.get("STANFORD_API_KEY", ""))
-    parser.add_argument("--api-url", default=STANFORD_DEFAULT_URL)
-    parser.add_argument("--model", default=STANFORD_DEFAULT_MODEL)
+    parser.add_argument(
+        "--label-backend", choices=sorted(label_backends.BACKENDS),
+        default="stanford",
+        help="Which label backend. stanford (default) needs "
+             "STANFORD_API_KEY; ollama needs a local Ollama daemon "
+             "with the chat model pulled.",
+    )
+    parser.add_argument("--api-key", default=os.environ.get("STANFORD_API_KEY", ""),
+                        help="Stanford API key (stanford backend only).")
+    parser.add_argument("--api-url", default=STANFORD_DEFAULT_URL,
+                        help="Stanford base URL (stanford backend only).")
+    parser.add_argument("--model", default=None,
+                        help="Model id. Default per backend: "
+                             f"stanford={STANFORD_DEFAULT_MODEL}, "
+                             f"ollama={OLLAMA_DEFAULT_MODEL}.")
+    parser.add_argument("--ollama-host", default=OLLAMA_DEFAULT_HOST,
+                        help="Ollama base URL (ollama backend only).")
     parser.add_argument(
         "--checkpoint-dir", type=Path,
         default=None,
@@ -402,12 +275,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--chunk-size", type=int, default=50)
     parser.add_argument(
         "--min-interval-s", type=float, default=0.0,
-        help="Pre-throttle: minimum seconds between successive gateway "
-             "requests. Default 0 (reactive only — back off on 429). "
-             "Set to e.g. 1.5 on a long run if the gateway is 429ing "
-             "during multi-hour labels (worm-tea-lit's 31k-row run on "
-             "2026-04-30 hit ~20 429s; min-interval-s 1.5 would have "
-             "preempted them).",
+        help="Pre-throttle: min seconds between successive gateway "
+             "requests. Default 0 (reactive only). stanford backend only.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -417,11 +286,20 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    cfg = StanfordConfig(
-        api_key=args.api_key, api_url=args.api_url, model=args.model,
-        min_interval_s=args.min_interval_s,
-    )
-    check_stanford(cfg)
+    backend_kwargs = {
+        "api_key": args.api_key,
+        "api_url": args.api_url,
+        "host": args.ollama_host,
+        "min_interval_s": args.min_interval_s,
+    }
+    if args.model:
+        backend_kwargs["model"] = args.model
+    elif args.label_backend == "ollama":
+        backend_kwargs["model"] = OLLAMA_DEFAULT_MODEL
+    # stanford's dataclass default already equals STANFORD_DEFAULT_MODEL.
+
+    backend = label_backends.make_backend(args.label_backend, **backend_kwargs)
+    backend.check()
 
     df = pd.read_csv(args.csv)
     logger.info("loaded %d rows from %s", len(df), args.csv)
@@ -459,7 +337,10 @@ def main(argv: list[str] | None = None) -> int:
         if rid in cached:
             continue
         prompt = _row_prompt(row)
-        result = call_stanford(prompt, cfg)
+        try:
+            result = backend.call(prompt, SYSTEM_PROMPT)
+        except label_backends.BackendError as exc:
+            result = _error_label(exc.reason)
         record = {
             "id": rid,
             "relevance_llm": result.get("relevance"),
@@ -494,6 +375,11 @@ def main(argv: list[str] | None = None) -> int:
                 args.out, len(merged),
                 int(merged["relevance_llm"].notna().sum())
                 if "relevance_llm" in merged.columns else 0)
+
+    if checkpoint_dir.exists():
+        shutil.rmtree(checkpoint_dir)
+        logger.info("removed checkpoints %s (corpus write succeeded)",
+                    checkpoint_dir)
 
     if "relevance_llm" in merged.columns:
         logger.info("\nrelevance_llm breakdown:\n%s",

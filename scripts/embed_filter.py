@@ -1,4 +1,4 @@
-"""Embed pipeline records with local Ollama BGE-M3 and score by anchor similarity.
+"""Embed pipeline records via a pluggable backend (default: Ollama BGE-M3) and score by anchor similarity.
 
 First-pass relevance filter for the literature corpus. Encodes
 ``title + abstract_snippet`` for each record, then scores against a
@@ -25,7 +25,9 @@ Usage::
         --csv results/microtexture_wos_screened.csv \
         --out results/microtexture_wos_screened_embedded.csv
 
-Prerequisites: ``ollama serve`` running locally and ``ollama pull bge-m3``.
+Prerequisites (default ``ollama`` backend): ``ollama serve`` running
+locally and ``ollama pull bge-m3``. Other backends selected with
+--embed-backend have their own prerequisites.
 """
 
 from __future__ import annotations
@@ -33,15 +35,15 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-import time
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 import pandas as pd
-import requests
-from tqdm import tqdm
+
+# Make embed_backends importable when running this script from anywhere.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import embed_backends  # noqa: E402
 
 logger = logging.getLogger("embed_filter")
 
@@ -90,85 +92,6 @@ ANCHORS: list[str] = [
     "Saprolith Verwitterung Granit Korngröße; saprólito intemperismo granito "
     "tamanho partícula; saprolita meteorización granito tamaño partícula.",
 ]
-
-
-# ---------------------------------------------------------------------------
-# Ollama client (mirrors the horizon-embed pattern)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class EmbedConfig:
-    """Configuration for the local Ollama embedding endpoint."""
-
-    model: str = "bge-m3"
-    host: str = "http://localhost:11434"
-    batch_size: int = 32
-    timeout_s: int = 300
-    max_retries: int = 3
-    normalize: bool = True
-
-
-def ping_ollama(cfg: EmbedConfig) -> None:
-    """Raise SystemExit with a friendly message if Ollama is not reachable."""
-    try:
-        resp = requests.get(f"{cfg.host}/api/tags", timeout=5)
-        resp.raise_for_status()
-    except requests.RequestException as exc:
-        raise SystemExit(
-            f"Cannot reach Ollama at {cfg.host}: {exc}\n"
-            f"Start it with: ollama serve   (and ensure: ollama pull {cfg.model})"
-        )
-    tags = [m["name"] for m in resp.json().get("models", [])]
-    if not any(t.startswith(cfg.model) for t in tags):
-        raise SystemExit(
-            f"Model '{cfg.model}' not pulled. Run: ollama pull {cfg.model}"
-        )
-
-
-def _post_batch(texts: Sequence[str], cfg: EmbedConfig) -> np.ndarray:
-    url = f"{cfg.host.rstrip('/')}/api/embed"
-    payload = {"model": cfg.model, "input": list(texts)}
-    last_err: Exception | None = None
-    for attempt in range(1, cfg.max_retries + 1):
-        try:
-            resp = requests.post(url, json=payload, timeout=cfg.timeout_s)
-            resp.raise_for_status()
-            data = resp.json()
-            embeds = data.get("embeddings")
-            if embeds is None and "embedding" in data:
-                embeds = [data["embedding"]]
-            if not embeds:
-                raise RuntimeError(f"empty embeddings: {data!r}")
-            arr = np.asarray(embeds, dtype=np.float32)
-            if arr.ndim != 2 or arr.shape[0] != len(texts):
-                raise RuntimeError(f"shape {arr.shape} != batch {len(texts)}")
-            return arr
-        except (requests.RequestException, ValueError, KeyError, RuntimeError) as err:
-            last_err = err
-            logger.warning(
-                "Ollama attempt %d/%d failed: %s", attempt, cfg.max_retries, err
-            )
-            time.sleep(1.5 * attempt)
-    raise RuntimeError(f"Ollama embedding failed after {cfg.max_retries} retries: {last_err}")
-
-
-def embed_texts(texts: Sequence[str], cfg: EmbedConfig) -> np.ndarray:
-    """Encode a sequence of texts; returns ``(N, D)`` float32, optionally L2-normed."""
-    if not texts:
-        return np.zeros((0, 0), dtype=np.float32)
-    out: list[np.ndarray] = []
-    n_batches = (len(texts) + cfg.batch_size - 1) // cfg.batch_size
-    for i in tqdm(range(0, len(texts), cfg.batch_size),
-                  total=n_batches, desc=f"embed ({cfg.model})"):
-        batch = texts[i : i + cfg.batch_size]
-        out.append(_post_batch(batch, cfg))
-    matrix = np.vstack(out)
-    if cfg.normalize:
-        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-        norms[norms == 0] = 1.0
-        matrix = matrix / norms
-    return matrix
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +148,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="Input CSV (must have an `id` column and `title`).")
     parser.add_argument("--out", type=Path, required=True,
                         help="Output CSV with embed_score + embed_top_anchor.")
-    parser.add_argument("--model", default="bge-m3", help="Ollama model tag.")
+    parser.add_argument(
+        "--embed-backend", choices=sorted(embed_backends.BACKENDS),
+        default="ollama",
+        help="Embedding backend. Only 'ollama' today; flag exists so "
+             "future Voyage/Jina/OpenAI-compatible backends slot in "
+             "without breaking the CLI.",
+    )
+    parser.add_argument("--model", default="bge-m3", help="Model identifier forwarded to the embedding backend.")
     parser.add_argument("--host", default="http://localhost:11434")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--no-cache", action="store_true",
@@ -238,8 +168,11 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    cfg = EmbedConfig(model=args.model, host=args.host, batch_size=args.batch_size)
-    ping_ollama(cfg)
+    backend = embed_backends.make_backend(
+        args.embed_backend,
+        model=args.model, host=args.host, batch_size=args.batch_size,
+    )
+    backend.check()
 
     df = pd.read_csv(args.csv)
     if "id" not in df.columns:
@@ -279,8 +212,8 @@ def main(argv: list[str] | None = None) -> int:
         n = len(to_encode_texts)
         for chunk_start in range(0, n, CHECKPOINT_EVERY):
             chunk_end = min(chunk_start + CHECKPOINT_EVERY, n)
-            chunk_mat = embed_texts(
-                to_encode_texts[chunk_start:chunk_end], cfg
+            chunk_mat = backend.embed(
+                to_encode_texts[chunk_start:chunk_end]
             )
             for offset, df_idx in enumerate(
                 to_encode_idx[chunk_start:chunk_end]
@@ -297,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Encode anchors fresh every run (cheap, and content may change).
     logger.info("encoding %d anchors", len(ANCHORS))
-    anchor_mat = embed_texts(ANCHORS, cfg)
+    anchor_mat = backend.embed(ANCHORS)
 
     # Score: max cosine over anchors. Both already L2-normed → dot is cosine.
     scores = np.full(len(df), np.nan, dtype=np.float32)

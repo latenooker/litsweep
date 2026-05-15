@@ -381,7 +381,7 @@ def _build_config(args: argparse.Namespace) -> api_clients.ClientConfig:
     return api_clients.ClientConfig(
         email=args.email,
         raw_dir=output / "raw",
-        error_log=output / "errors.log",
+        error_log=output / "logs" / "errors.log",
         semantic_scholar_key=os.environ.get("SEMANTIC_SCHOLAR_KEY"),
         wos_key=os.environ.get("WOS_API_KEY"),
         wos_expanded_key=os.environ.get("WOS_EXPANDED_API_KEY"),
@@ -413,6 +413,13 @@ def main(argv: list[str] | None = None) -> int:
              "Default: data/doi_exclude.txt — written by "
              "scripts/scaffold_new_search.py --from-existing-corpus, "
              "or hand-managed. Set to '' to disable.",
+    )
+    parser.add_argument(
+        "--cleanup", action=argparse.BooleanOptionalAction, default=True,
+        help="At end of a successful run, parquet-archive results/raw/ "
+             "to results/archive/raw_archive.parquet and delete "
+             "results/raw/. Default: on. Pass --no-cleanup to keep the "
+             "raw JSON cache in place.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -469,10 +476,8 @@ def main(argv: list[str] | None = None) -> int:
             excl = {ln.strip().lower() for ln in excl_path.read_text().splitlines()
                     if ln.strip()}
             before = len(deduped)
-            deduped = [
-                r for r in deduped
-                if str(r.get("doi", "") or "").strip().lower() not in excl
-            ]
+            mask = ~deduped["doi"].fillna("").astype(str).str.strip().str.lower().isin(excl)
+            deduped = deduped[mask].reset_index(drop=True)
             logger.info(
                 "DOI exclude (%s): dropped %d records → %d remaining",
                 excl_path, before - len(deduped), len(deduped),
@@ -524,6 +529,15 @@ def main(argv: list[str] | None = None) -> int:
     augmented[final_cols].to_csv(csv_path, index=False)
     write_bibtex(augmented, bib_path)
     logger.info("Wrote %s (%d rows) and %s", csv_path, len(augmented), bib_path)
+
+    if args.cleanup:
+        sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
+        try:
+            import disk_hygiene
+            disk_hygiene.archive_raw(output, delete=True)
+        except Exception as exc:  # cleanup is best-effort, never fatal
+            logger.warning("disk_hygiene cleanup failed (non-fatal): %s", exc,
+                            exc_info=True)
 
     return 0
 

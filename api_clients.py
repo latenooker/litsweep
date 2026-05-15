@@ -1239,9 +1239,20 @@ def search_core(
             title = r.get("title")
             abstract = r.get("abstract")
             authors_list = r.get("authors") or []
-            authors = "; ".join(
-                a.get("name") for a in authors_list if isinstance(a, dict) and a.get("name")
-            )
+            # CORE has an upstream metadata bug for some records: it
+            # returns the cited-bibliography last-name list as `authors`
+            # (e.g. >100 entries for a normal 5-author paper, with names
+            # like "Ahnert; Almond; Anderson; …"). Drop the field
+            # entirely if it looks like that — downstream dedup will
+            # pick up the authors from a more reliable source
+            # (OpenAlex / CrossRef / Semantic Scholar) when one exists.
+            if len(authors_list) > 25:
+                authors = ""
+            else:
+                authors = "; ".join(
+                    a.get("name") for a in authors_list
+                    if isinstance(a, dict) and a.get("name")
+                )
             year = r.get("yearPublished")
             urls = r.get("sourceFulltextUrls") or []
             url = urls[0] if urls else (f"https://doi.org/{doi}" if doi else None)
