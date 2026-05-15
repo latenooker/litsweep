@@ -79,7 +79,12 @@ class StanfordBackend:
     _last_request_t: float = field(default=0.0, init=False, repr=False)
 
     def check(self) -> None:
-        """Probe the gateway; raise SystemExit if no API key. Model-list failure is non-fatal."""
+        """Probe the gateway before a run.
+
+        Raises:
+            SystemExit: If ``api_key`` is empty. A failure to list
+                models is logged but non-fatal (best-effort probe).
+        """
         if not self.api_key:
             raise SystemExit(
                 "Stanford API key not set. Pass --api-key or STANFORD_API_KEY."
@@ -150,7 +155,10 @@ class StanfordBackend:
                 content = body["choices"][0]["message"]["content"]
                 return json.loads(_strip_code_fence(content))
             except urllib.error.HTTPError as exc:
-                err_body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
+                err_body = (
+                    exc.read().decode("utf-8", errors="replace")
+                    if hasattr(exc, "read") else ""
+                )
                 if exc.code == 429:
                     rate_limit_attempts += 1
                     if rate_limit_attempts >= MAX_429_RETRIES:
@@ -209,7 +217,7 @@ def make_backend(name: str, **kwargs: Any) -> Any:
     if name not in BACKENDS:
         raise SystemExit(
             f"Unknown label backend: {name!r}. "
-            f"Valid: {sorted(BACKENDS) or ['stanford', 'ollama']}"
+            f"Valid: {sorted(BACKENDS)}"
         )
     cls = BACKENDS[name]
     if not hasattr(cls, "__dataclass_fields__"):

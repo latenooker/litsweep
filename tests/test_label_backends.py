@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -24,11 +26,7 @@ def test_backend_error_carries_reason():
     assert err.reason == "HTTP 500"
 
 
-import json
-from unittest.mock import patch, MagicMock
-
-
-def _mock_urlopen_ok(payload: dict):
+def _mock_urlopen_ok(payload: dict) -> MagicMock:
     """Build a context-manager mock that returns ``payload`` JSON."""
     cm = MagicMock()
     cm.__enter__.return_value = MagicMock(
