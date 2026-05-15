@@ -1,5 +1,6 @@
 requests>=2.31
 pandas>=2.0
+pyarrow>=14.0
 bibtexparser>=1.4
 beautifulsoup4>=4.12
 tqdm>=4.66

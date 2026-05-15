@@ -78,7 +78,26 @@ def archive_raw(results: Path, delete: bool = True) -> Path | None:
             "payload_json": fp.read_text(encoding="utf-8"),
         })
     df = pd.DataFrame(rows)
+    if archive.exists():
+        logger.warning("overwriting existing %s", archive)
     df.to_parquet(archive, compression="zstd", compression_level=9)
+
+    # Verify the archive round-trips before irreversibly deleting raw/.
+    # A truncated or structurally-corrupt parquet that didn't raise on
+    # write must NOT cost us the source JSON cache.
+    try:
+        written_rows = len(pd.read_parquet(archive))
+    except Exception as exc:
+        raise RuntimeError(
+            f"Archive at {archive} failed to read back ({exc}); "
+            f"raw/ left intact."
+        )
+    if written_rows != len(rows):
+        raise RuntimeError(
+            f"Archive row-count mismatch: wrote {len(rows)} records but "
+            f"read back {written_rows}; raw/ left intact ({archive})."
+        )
+
     md5 = _md5(archive)
     logger.info("wrote %s (%d JSON files, md5=%s)", archive, len(rows), md5)
 

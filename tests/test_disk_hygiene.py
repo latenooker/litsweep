@@ -62,3 +62,24 @@ def test_cli_main_no_delete(tmp_path: Path):
     assert rc == 0
     assert (results / "archive" / "raw_archive.parquet").exists()
     assert (results / "raw").exists()
+
+
+def test_cli_main_delete_default(tmp_path: Path):
+    results = tmp_path / "results"
+    _make_raw(results, 2)
+    rc = disk_hygiene.main(["--results", str(results)])
+    assert rc == 0
+    assert (results / "archive" / "raw_archive.parquet").exists()
+    assert not (results / "raw").exists()      # default deletes
+
+
+def test_corrupt_archive_keeps_raw(tmp_path: Path, monkeypatch):
+    results = tmp_path / "results"
+    _make_raw(results, 3)
+    import pandas as _pd
+    # Force the round-trip read to report the wrong row count.
+    monkeypatch.setattr(disk_hygiene.pd, "read_parquet",
+                         lambda *_a, **_k: _pd.DataFrame({"x": [1]}))
+    with pytest.raises(RuntimeError, match="row-count mismatch"):
+        disk_hygiene.archive_raw(results, delete=True)
+    assert (results / "raw").exists()          # raw/ NOT deleted
