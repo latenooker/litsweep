@@ -1,4 +1,4 @@
-"""Label abstracts via the Stanford AI API gateway (OpenAI-compatible).
+"""Label abstracts via a pluggable LLM backend (Stanford gateway or local Ollama).
 
 Reads a CSV of records (typically the high-`embed_score` survivors from
 ``embed_filter.py``), sends ``title + abstract`` to a chat-completion
@@ -20,9 +20,11 @@ avoid colliding with screener-derived columns of the same name)::
 Checkpoints to ``--checkpoint-dir`` every ``--chunk-size`` rows so a
 Ctrl-C costs at most one chunk. Re-running the same command resumes.
 
-Backend: Stanford AI API gateway. Default base URL
-``https://aiapi-prod.stanford.edu/v1``; default model
-``gemini-2.0-flash-lite-001``. Set ``STANFORD_API_KEY`` env var.
+Backend: selected with ``--label-backend`` (default ``stanford``).
+The ``stanford`` backend needs ``STANFORD_API_KEY`` and defaults to
+model ``gemini-2.0-flash-lite-001`` at ``https://aiapi-prod.stanford.edu/v1``;
+the ``ollama`` backend needs a local Ollama daemon with the chat model
+pulled (e.g. ``ollama pull llama3.1``).
 
 Usage::
 
