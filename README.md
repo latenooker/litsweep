@@ -62,7 +62,7 @@ Symlinks `skills/claude/litsweep-deploy/` into `~/.claude/skills/` and
 `skills/codex/litsweep-deploy/` into `~/.codex/skills/`. Idempotent —
 re-run after `git pull` to pick up updates, or if you move the
 litsweep checkout. A pre-existing non-symlink directory at the target
-is left untouched with an actionable message (nothing is deleted).
+An empty placeholder directory at the target is removed and replaced with the symlink; a non-empty real directory is left untouched with an actionable message and that tool is skipped. No directory containing files is ever deleted.
 
 ## What's in this repo
 
