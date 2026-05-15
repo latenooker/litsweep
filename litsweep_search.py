@@ -469,10 +469,8 @@ def main(argv: list[str] | None = None) -> int:
             excl = {ln.strip().lower() for ln in excl_path.read_text().splitlines()
                     if ln.strip()}
             before = len(deduped)
-            deduped = [
-                r for r in deduped
-                if str(r.get("doi", "") or "").strip().lower() not in excl
-            ]
+            mask = ~deduped["doi"].fillna("").astype(str).str.strip().str.lower().isin(excl)
+            deduped = deduped[mask].reset_index(drop=True)
             logger.info(
                 "DOI exclude (%s): dropped %d records → %d remaining",
                 excl_path, before - len(deduped), len(deduped),
