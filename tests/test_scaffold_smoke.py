@@ -11,6 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_scaffold_creates_new_subdirs(tmp_path: Path):
+    """Scaffold creates the cleanup-layout results/ subdirs and data/."""
     target = tmp_path / "foo_lit"
     subprocess.run(
         [
@@ -23,9 +24,12 @@ def test_scaffold_creates_new_subdirs(tmp_path: Path):
         assert (target / "results" / sub).is_dir(), f"missing results/{sub}/"
     assert (target / "results/raw").is_dir()
     assert (target / "data").is_dir()
+    assert (target / "results/gapfills/.gitkeep").is_file()
+    assert not (target / "scripts/.gitkeep").exists()
 
 
 def test_scaffolded_orchestrator_dry_run_succeeds(tmp_path: Path):
+    """A freshly scaffolded orchestrator passes --dry-run."""
     target = tmp_path / "bar_lit"
     subprocess.run(
         [
@@ -38,4 +42,6 @@ def test_scaffolded_orchestrator_dry_run_succeeds(tmp_path: Path):
         [sys.executable, str(target / "bar_lit_search.py"), "--dry-run"],
         cwd=target, capture_output=True, text=True,
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, (
+        f"rc={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
+    )

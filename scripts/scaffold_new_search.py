@@ -797,17 +797,18 @@ def main(argv: list[str] | None = None) -> int:
         shutil.rmtree(target)
 
     # Create dir tree
-    for sub in (
-        "scripts", "docs/session_logs",
+    _GITKEEP_SUBDIRS = (
         "results/raw",
         "results/gapfills",
         "results/pilots",
         "results/analysis",
         "results/archive",
         "results/logs",
-    ):
+    )
+    for sub in ("scripts", "docs/session_logs", *_GITKEEP_SUBDIRS):
         (target / sub).mkdir(parents=True, exist_ok=True)
-        (target / sub / ".gitkeep").touch()
+        if sub in _GITKEEP_SUBDIRS:
+            (target / sub / ".gitkeep").touch()
     # data/ holds DOI exclude lists, carryover bibliographies, and any
     # other small derived inputs the orchestrator needs at run time.
     # Created unconditionally so `--from-existing-corpus` and downstream
