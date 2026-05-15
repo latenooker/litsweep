@@ -29,7 +29,6 @@ RULES: list[tuple[str, str]] = [
     ("raw_archive*.parquet", "archive"),
     ("*.bak", "archive"),
     ("*.bak.*", "archive"),
-    ("*.pre_source_recovery.bak", "archive"),
     ("pilot*_labeled*.csv", "pilots"),
     ("pilot*.csv", "pilots"),
     ("gap_matrix_*.csv", "analysis"),
@@ -41,6 +40,9 @@ RULES: list[tuple[str, str]] = [
     ("*.pdf", "analysis"),
 ]
 
+# Gap-fill CSVs: the slug must END in `_gap` (e.g. wos_gap_records.csv),
+# NOT start with `gap_` (gap_matrix_*.csv stays an analysis artifact).
+# Routed to gapfills/<slug>/<stage>.csv; stage defaults to "records".
 _GAP_RE = re.compile(
     r"^(?P<name>[a-z][a-z0-9_]*_gap)(?:_(?P<stage>.+))?\.csv$"
 )
@@ -140,11 +142,29 @@ def main(argv: list[str] | None = None) -> int:
         print("nothing to move (0 files moved).")
         return 0
 
+    from collections import Counter
+    dst_counts = Counter(dst for _, dst in moves)
+    collisions = sorted(
+        str(d.relative_to(project)) for d, n in dst_counts.items() if n > 1
+    )
+    if collisions:
+        raise SystemExit(
+            "ERROR: multiple source files map to the same destination "
+            f"(refusing to move anything): {collisions}. Resolve the "
+            "duplicates manually, then re-run."
+        )
+
     for src, dst in moves:
         rel_src = src.relative_to(project)
         rel_dst = dst.relative_to(project)
         if args.apply:
             dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.exists():
+                raise SystemExit(
+                    f"ERROR: destination already exists, refusing to "
+                    f"overwrite: {dst.relative_to(project)} (from "
+                    f"{src.relative_to(project)}). Resolve manually."
+                )
             shutil.move(str(src), str(dst))
             print(f"moved {rel_src} -> {rel_dst}")
         else:

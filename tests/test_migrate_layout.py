@@ -79,8 +79,10 @@ def test_apply_moves_cruft_preserves_canonical(tmp_path: Path):
     assert (r / "archive/raw_archive.parquet").exists()
     assert (r / "archive/foo_lit_bibliography.bib.bak").exists()
     assert (r / "archive/foo_lit_labeled_corpus.pre_source_recovery.bak").exists()
-    assert (r / "gapfills/wos_gap/records.csv").exists() or \
-           (r / "gapfills/wos_gap/wos_gap_records.csv").exists()
+    assert (r / "foo_lit_bibliography.bib").exists()
+    assert (r / "gapfills/wos_gap/records.csv").exists()
+    assert (r / "gapfills/wos_gap/records_embedded.csv").exists()
+    assert (r / "gapfills/wos_gap/records_labeled.csv").exists()
     assert (r / "pilots/pilot50_labeled.csv").exists()
     assert (r / "analysis/gap_matrix_cells.csv").exists()
     assert (r / "analysis/cross_project_bridges_2026-04-01.csv").exists()
@@ -95,3 +97,22 @@ def test_apply_is_idempotent(tmp_path: Path):
     result = subprocess.run([sys.executable, str(SCRIPT), str(tmp_path), "--apply"],
                             capture_output=True, text=True, check=True)
     assert "0 files moved" in result.stdout.lower() or "nothing to move" in result.stdout.lower()
+
+
+def test_apply_refuses_on_destination_collision(tmp_path: Path):
+    r = tmp_path / "results"
+    r.mkdir(parents=True)
+    # Both map to gapfills/x_gap/records.csv -> must refuse, move nothing.
+    (r / "x_gap.csv").write_text("a\n")
+    (r / "x_gap_records.csv").write_text("b\n")
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(tmp_path), "--apply"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert "collision" in (result.stdout + result.stderr).lower() or \
+           "same destination" in (result.stdout + result.stderr).lower()
+    # Nothing moved.
+    assert (r / "x_gap.csv").exists()
+    assert (r / "x_gap_records.csv").exists()
+    assert not (r / "gapfills").exists()
