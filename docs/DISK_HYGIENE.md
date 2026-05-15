@@ -163,7 +163,7 @@ su-drive:
     └── YYYY-MM-DD/                 # one snapshot per major stage
         ├── <slug>_bibliography.csv
         ├── <slug>_bibliography.bib
-        ├── raw_archive.parquet
+        ├── raw_archive.parquet         # pushed flat from results/archive/raw_archive.parquet
         ├── <slug>_bibliography_embedded.csv
         ├── <slug>_bibliography_embedded.embeddings.npy
         ├── <slug>_bibliography_embedded.embeddings.ids.txt

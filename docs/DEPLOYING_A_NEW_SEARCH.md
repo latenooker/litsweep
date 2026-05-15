@@ -37,7 +37,7 @@ work and depend on your topic.
 - **A labeling backend.** `scripts/label_with_stanford.py` takes
   `--label-backend {stanford,ollama}` (default `stanford`):
   - `stanford` — the Stanford AI gateway; needs `STANFORD_API_KEY`
-    in the environment. The cheaper/faster default path.
+    in the environment. The default path.
   - `ollama` — local Ollama with a chat model pulled (e.g.
     `ollama pull llama3.1`); **no Stanford key required**. Slower
     but fully offline / zero API cost.
@@ -308,6 +308,7 @@ python scripts/label_with_stanford.py \
     --ollama-host http://localhost:11434 \
     --model llama3.1:8b-instruct-q4_K_M \
     --min-score 0.45
+    # add --min-interval-s 2 if Ollama starts dropping/refusing requests
 ```
 
 Wallclock for a typical 10k–20k record corpus: ~1 minute harvest per

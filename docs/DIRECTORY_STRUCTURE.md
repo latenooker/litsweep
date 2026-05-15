@@ -51,12 +51,12 @@ my-search-lit/                       # repo root; one project = one repo
 │   ├── <slug>_bibliography_embedded.embeddings.ids.txt
 │   ├── <slug>_labeled_corpus.csv             # the deliverable
 │   ├── <slug>_labeled_corpus.checkpoints/    # per-50-row chunks (auto-deleted on successful write)
-│   ├── raw/                  per-query JSON cache (parquet-archived + deleted at end of run unless --no-cleanup)
-│   ├── gapfills/<name>/      gap-fill chains (bibliography.csv, bibliography_embedded.csv, labeled.csv)
-│   ├── pilots/               smoke-test outputs (e.g. pilot50_labeled.csv)
-│   ├── analysis/             derived artifacts (gap_matrix, cross-project bridges, *.png/*.pdf)
-│   ├── archive/              raw_archive.parquet, *.bak files
-│   └── logs/                 harvest/embed/label logs, errors.log
+│   ├── raw/                                  # per-query JSON cache (parquet-archived + deleted at end of run unless --no-cleanup)
+│   ├── gapfills/<name>/                       # gap-fill chains (bibliography.csv, bibliography_embedded.csv, labeled.csv)
+│   ├── pilots/                                # smoke-test outputs (e.g. pilot50_labeled.csv)
+│   ├── analysis/                              # derived artifacts (gap_matrix, cross-project bridges, *.png/*.pdf)
+│   ├── archive/                               # raw_archive.parquet, *.bak files
+│   └── logs/                                  # harvest/embed/label logs, errors.log
 └── tests/                                    # (optional) project-specific tests
 ```
 
