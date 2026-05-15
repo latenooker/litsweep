@@ -1,4 +1,4 @@
-"""Embed pipeline records with local Ollama BGE-M3 and score by anchor similarity.
+"""Embed pipeline records via a pluggable backend (default: Ollama BGE-M3) and score by anchor similarity.
 
 First-pass relevance filter for the literature corpus. Encodes
 ``title + abstract_snippet`` for each record, then scores against a
@@ -25,7 +25,9 @@ Usage::
         --csv results/microtexture_wos_screened.csv \
         --out results/microtexture_wos_screened_embedded.csv
 
-Prerequisites: ``ollama serve`` running locally and ``ollama pull bge-m3``.
+Prerequisites (default ``ollama`` backend): ``ollama serve`` running
+locally and ``ollama pull bge-m3``. Other backends selected with
+--embed-backend have their own prerequisites.
 """
 
 from __future__ import annotations
@@ -153,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
              "future Voyage/Jina/OpenAI-compatible backends slot in "
              "without breaking the CLI.",
     )
-    parser.add_argument("--model", default="bge-m3", help="Ollama model tag.")
+    parser.add_argument("--model", default="bge-m3", help="Model identifier forwarded to the embedding backend.")
     parser.add_argument("--host", default="http://localhost:11434")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--no-cache", action="store_true",
