@@ -90,3 +90,12 @@ def test_ollama_label_backend_raises_on_unparseable():
         with patch("label_backends.time.sleep"):
             with pytest.raises(label_backends.BackendError):
                 backend.call("prompt", "system")
+
+
+def test_ollama_label_backend_strips_code_fences():
+    backend = label_backends.make_backend("ollama")
+    payload = {"message": {"content": '```json\n{"relevance": "core"}\n```'}}
+    with patch("label_backends.requests.post",
+               return_value=_mock_requests_post(payload)):
+        result = backend.call("prompt", "system")
+    assert result == {"relevance": "core"}

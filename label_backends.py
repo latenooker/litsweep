@@ -236,7 +236,8 @@ class OllamaLabelBackend:
                 f"(and ensure: ollama pull {self.model})"
             )
         tags = [m["name"] for m in resp.json().get("models", [])]
-        if not any(t.startswith(self.model.split(":")[0]) for t in tags):
+        base = self.model.split(":")[0]
+        if not any(t == self.model or t.startswith(base + ":") for t in tags):
             raise SystemExit(
                 f"Model '{self.model}' not pulled. Run: ollama pull {self.model}"
             )
@@ -290,7 +291,7 @@ class OllamaLabelBackend:
 
 BACKENDS: dict[str, type] = {
     "stanford": StanfordBackend,
-    "ollama":   OllamaLabelBackend,
+    "ollama": OllamaLabelBackend,
 }
 
 
