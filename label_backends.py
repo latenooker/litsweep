@@ -21,6 +21,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
+import requests
+
 logger = logging.getLogger("label_backends")
 
 
@@ -192,8 +194,103 @@ class StanfordBackend:
         raise BackendError("max retries exhausted")
 
 
+@dataclass
+class OllamaLabelBackend:
+    """Local Ollama chat backend with ``format="json"`` for structured labels.
+
+    Reuses the same daemon the embedder already needs. Smaller open-weights
+    models are less reliable at strict-JSON than gateway gemini/gpt — set
+    ``model`` to something instruction-tuned (llama3.1, qwen2.5, mistral-nemo)
+    and verify with a 50-record pilot before a full run.
+
+    Attributes:
+        host: Ollama base URL.
+        model: Ollama model tag (must be pulled: ``ollama pull <model>``).
+        temperature: Forwarded; 0.0 for label determinism.
+        num_predict: Max tokens; Ollama's analogue of max_tokens.
+        timeout_s: Per-request timeout.
+        max_retries: Retries on RequestException or unparseable JSON.
+    """
+
+    host: str = "http://localhost:11434"
+    model: str = "llama3.1:8b-instruct-q4_K_M"
+    temperature: float = 0.0
+    num_predict: int = 400
+    timeout_s: int = 300
+    max_retries: int = 3
+
+    def check(self) -> None:
+        """Probe the Ollama daemon.
+
+        Raises:
+            SystemExit: If the daemon is unreachable or the model is
+                not pulled.
+        """
+        try:
+            resp = requests.get(f"{self.host}/api/tags", timeout=5)
+            resp.raise_for_status()
+        except requests.RequestException as exc:
+            raise SystemExit(
+                f"Cannot reach Ollama at {self.host}: {exc}\n"
+                f"Start it with: ollama serve   "
+                f"(and ensure: ollama pull {self.model})"
+            )
+        tags = [m["name"] for m in resp.json().get("models", [])]
+        if not any(t.startswith(self.model.split(":")[0]) for t in tags):
+            raise SystemExit(
+                f"Model '{self.model}' not pulled. Run: ollama pull {self.model}"
+            )
+
+    def call(self, prompt: str, system_prompt: str) -> dict[str, Any]:
+        """Call local Ollama chat and return parsed JSON, or raise BackendError.
+
+        Args:
+            prompt: User-role content (title + abstract block).
+            system_prompt: The project SYSTEM_PROMPT (schema instructions).
+
+        Returns:
+            The parsed JSON object the model returned.
+
+        Raises:
+            BackendError: On permanent failure (transport error or
+                unparseable response after ``max_retries``).
+        """
+        url = f"{self.host.rstrip('/')}/api/chat"
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            "format": "json",
+            "stream": False,
+            "options": {
+                "temperature": self.temperature,
+                "num_predict": self.num_predict,
+            },
+        }
+        last_err: Exception | None = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                resp = requests.post(url, json=payload, timeout=self.timeout_s)
+                resp.raise_for_status()
+                content = resp.json()["message"]["content"]
+                return json.loads(_strip_code_fence(content))
+            except (requests.RequestException, ValueError, KeyError) as err:
+                last_err = err
+                logger.warning(
+                    "Ollama label attempt %d/%d failed: %s",
+                    attempt, self.max_retries, err,
+                )
+                time.sleep(1.5 * attempt)
+        raise BackendError(
+            f"Ollama label failed after {self.max_retries} retries: {last_err}"
+        )
+
+
 BACKENDS: dict[str, type] = {
     "stanford": StanfordBackend,
+    "ollama":   OllamaLabelBackend,
 }
 
 

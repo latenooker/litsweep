@@ -58,3 +58,35 @@ def test_stanford_backend_strips_code_fences():
                return_value=_mock_urlopen_ok(payload)):
         result = backend.call("prompt", "system")
     assert result == {"relevance": "core"}
+
+
+def _mock_requests_post(json_payload: dict, status: int = 200) -> MagicMock:
+    """Mock for requests.post returning ``json_payload``."""
+    resp = MagicMock()
+    resp.status_code = status
+    resp.json.return_value = json_payload
+    resp.raise_for_status.side_effect = (
+        None if status < 400 else Exception(f"HTTP {status}")
+    )
+    return resp
+
+
+def test_ollama_label_backend_parses_chat_response():
+    backend = label_backends.make_backend("ollama")
+    payload = {
+        "message": {"content": '{"relevance": "adjacent", "rationale": "x"}'}
+    }
+    with patch("label_backends.requests.post",
+               return_value=_mock_requests_post(payload)):
+        result = backend.call("prompt", "system")
+    assert result == {"relevance": "adjacent", "rationale": "x"}
+
+
+def test_ollama_label_backend_raises_on_unparseable():
+    backend = label_backends.make_backend("ollama")
+    payload = {"message": {"content": "not json at all"}}
+    with patch("label_backends.requests.post",
+               return_value=_mock_requests_post(payload)):
+        with patch("label_backends.time.sleep"):
+            with pytest.raises(label_backends.BackendError):
+                backend.call("prompt", "system")
