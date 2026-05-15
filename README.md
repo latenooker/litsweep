@@ -1,14 +1,11 @@
 # litsweep
 
 Scaffold for multilingual literature-search projects:
-harvest from up to 13 bibliographic databases → DOI/Jaccard dedup →
-local Ollama BGE-M3 embedding + per-anchor cosine filtering →
-strict-JSON LLM labeling (Stanford gateway *or* local Ollama).
+harvest from up to 13 bibliographic databases → deduplication →
+local embedding + filtering around anchor papers →
+structured labeling (Stanford gateway *or* local Ollama).
 
-This repo is the **source of truth** for every shared piece of
-infrastructure used by individual lit-search projects (currently
-native-sand, reworming-lit, microtexture-lit-search, worm-tea-lit;
-soon yours). Projects byte-copy the infra at scaffold time — don't
+This repo is meant to be a template that is copied for individual lit-search projects. Projects byte-copy the infra at scaffold time — don't
 edit them in-place if you want consistency across the family.
 
 ## Quick start
