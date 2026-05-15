@@ -397,7 +397,11 @@ After the first labeled-corpus pass:
    pattern).
 3. **Re-run only the new queries.** `scripts/wos_gap_fill.py` is the
    reusable harness; it fetches, embeds, labels, and writes a side-
-   channel CSV without touching the main corpus.
+   channel CSV without touching the main corpus. Note: gap-fill
+   harvests still write to a flat `results/` path by default; pass
+   an explicit `--out` (for `wos_gap_fill.py`) or `--gap-dir` (for
+   `merge_gap_fill.py`), or run `scripts/migrate_layout.py`
+   afterward to file them under `results/gapfills/`.
 4. **Merge when satisfied.** Append the gap-fill rows to
    `<slug>_labeled_corpus.csv` with DOI dedup; re-run embed_filter on
    the merged corpus to extend the embedding matrix; re-run any

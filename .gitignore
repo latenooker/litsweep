@@ -52,6 +52,10 @@ results/*_labeled*.csv
 results/*_labeled*.checkpoints/
 !results/raw/.gitkeep
 !results/logs/.gitkeep
+results/archive/*.parquet
+results/archive/*.bak
+results/archive/*.bak.*
+!results/archive/.gitkeep
 
 # Obsidian vault config
 .obsidian/
