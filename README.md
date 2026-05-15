@@ -1,9 +1,12 @@
 # litsweep
 
 Scaffold for multilingual literature-search projects:
-harvest from up to 13 bibliographic databases → deduplication →
-local embedding + filtering around anchor papers →
-structured labeling (Stanford gateway *or* local Ollama).
+harvest from up to 13 bibliographic databases → deduplication → local embedding + filtering around anchor papers → structured labeling (Stanford gateway *or* local Ollama). 
+
+Example use cases:
+- Structured identification of data coverage (e.g., publications per cell in covariate space) 
+- Simultaneous query of multiple disciplines' treatment of a common phenomenon
+- Triage of papers for full download
 
 This repo is meant to be a template that is copied for individual lit-search projects. Projects byte-copy the infra at scaffold time — don't
 edit them in-place if you want consistency across the family.
