@@ -32,13 +32,30 @@ class BackendError(Exception):
 BACKENDS: dict[str, type] = {}
 
 
-def make_backend(name: str, **kwargs: Any):
-    """Build a backend by name; raise SystemExit on unknown name."""
+def make_backend(name: str, **kwargs: Any) -> Any:
+    """Build a label backend instance by name.
+
+    Args:
+        name: Registry key (must be present in ``BACKENDS``).
+        **kwargs: Candidate constructor arguments; only those matching
+            the backend dataclass's fields are forwarded, so callers can
+            pass the union of all backends' options (e.g. an argparse
+            namespace) without error.
+
+    Returns:
+        An instantiated backend (one of the ``BACKENDS`` values).
+
+    Raises:
+        SystemExit: If ``name`` is not a registered backend, or the
+            registered class is not a dataclass.
+    """
     if name not in BACKENDS:
         raise SystemExit(
             f"Unknown label backend: {name!r}. "
             f"Valid: {sorted(BACKENDS) or ['stanford', 'ollama']}"
         )
     cls = BACKENDS[name]
+    if not hasattr(cls, "__dataclass_fields__"):
+        raise SystemExit(f"Backend {name!r} ({cls!r}) must be a @dataclass.")
     accepted = {k: v for k, v in kwargs.items() if k in cls.__dataclass_fields__}
     return cls(**accepted)
