@@ -1,6 +1,7 @@
 ---
 name: litsweep-deploy
 description: Use when the user asks to "set up a new lit search", "scaffold a litsweep project", "deploy litsweep", "start a new bibliographic search", or describes building a topic-specific multilingual literature corpus. Drives scaffold → fill the 4 topic files → first labeled corpus.
+allowed-tools: Bash, Read, Write, Edit, AskUserQuestion
 ---
 
 # litsweep-deploy
