@@ -536,7 +536,8 @@ def main(argv: list[str] | None = None) -> int:
             import disk_hygiene
             disk_hygiene.archive_raw(output, delete=True)
         except Exception as exc:  # cleanup is best-effort, never fatal
-            logger.warning("disk_hygiene cleanup failed (non-fatal): %s", exc)
+            logger.warning("disk_hygiene cleanup failed (non-fatal): %s", exc,
+                            exc_info=True)
 
     return 0
 
