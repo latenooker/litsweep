@@ -107,6 +107,12 @@ TEMPLATED_FILES = [
     # local dedup.py running through merge_gap_fill (see
     # docs/BACKPORTING_NEW_SOURCES.md, "Critical: dedup idempotence").
     "scripts/recover_source_databases_from_bib.py",
+    # disk_hygiene.py / migrate_layout.py are the layout-cleanup tools;
+    # slug-agnostic (operate on results/ paths, no project slug) so they
+    # pass through substitution unchanged. disk_hygiene must ship because
+    # litsweep_search.py imports it for end-of-run --cleanup archiving.
+    "scripts/disk_hygiene.py",
+    "scripts/migrate_layout.py",
 ]
 
 
