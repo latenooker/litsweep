@@ -5,7 +5,8 @@ for Voyage / Jina / Cohere / OpenAI-compatible additions as one new
 dataclass + one entry in ``BACKENDS``.
 
 Backends expose a single ``embed(texts) -> np.ndarray`` returning a
-``(N, D)`` float32 matrix, L2-normed (so dot products are cosines).
+``(N, D)`` float32 matrix, L2-normed by default (see ``normalize``),
+so dot products are cosines.
 ``check()`` raises ``SystemExit`` with a friendly message if the
 backend can't be reached.
 """
@@ -134,7 +135,9 @@ def make_backend(name: str, **kwargs: Any) -> Any:
     Args:
         name: Registry key (must be present in ``BACKENDS``).
         **kwargs: Candidate constructor arguments; only those matching
-            the backend dataclass's fields are forwarded.
+            the backend dataclass's fields are forwarded, so callers can
+            pass the union of all backends' options (e.g. an argparse
+            namespace) without error.
 
     Returns:
         An instantiated embed backend.
