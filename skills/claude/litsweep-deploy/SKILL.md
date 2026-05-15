@@ -19,8 +19,9 @@ dedups, embeds locally with Ollama BGE-M3, and labels with an LLM
 
 ## When NOT to use
 
-- The project is already scaffolded and the user is editing
-  queries/vocab/anchors — just help in-line.
+- The project is already scaffolded AND past its first labeled corpus —
+  the user is doing maintenance edits, not a first deploy. (Anchor/query
+  tuning DURING the initial deploy is in scope — see the diagnostic step.)
 - The user is re-running an existing pipeline — just run the commands.
 
 ## Prerequisite check (do this FIRST, before scaffolding)
@@ -36,7 +37,7 @@ which rclone gh 2>/dev/null
 
 Pick the label backend from what's available:
 
-- `STANFORD_API_KEY` set → default `--label-backend stanford`.
+- `STANFORD_API_KEY` set → use `--label-backend stanford`.
 - No Stanford key but Ollama has a chat model → `--label-backend
   ollama --ollama-host http://localhost:11434 --model <chat_model>`
   (suggest `ollama pull llama3.1` if none).
@@ -52,7 +53,7 @@ python /path/to/litsweep/scripts/scaffold_new_search.py \
     /path/to/<topic>-lit --name <topic>_lit
 ```
 
-If a sibling project's corpus overlaps, skip its DOIs:
+Optional — only if a related sibling project already has a labeled corpus whose DOIs you want to skip (a brand-new first project has no sibling; omit this entirely):
 
 ```bash
 python /path/to/litsweep/scripts/scaffold_new_search.py \
@@ -83,6 +84,7 @@ user about their topic and draft each:
 
 ```bash
 cd /path/to/<topic>-lit
+python3 -m venv .venv && source .venv/bin/activate   # isolate deps
 python -m pip install -r requirements.txt
 
 # 1. Validate queries (no API calls)
@@ -141,7 +143,7 @@ rclone copy results/<topic>_lit_labeled_corpus.csv <remote>:<topic>_lit/$(date +
 rclone copy results/<topic>_lit_bibliography_embedded.csv <remote>:<topic>_lit/$(date +%F)/
 rclone copy results/<topic>_lit_bibliography_embedded.embeddings.npy <remote>:<topic>_lit/$(date +%F)/
 rclone copy results/archive/raw_archive.parquet <remote>:<topic>_lit/$(date +%F)/
-rclone hashsum md5 <remote>:<topic>_lit/$(date +%F)/<topic>_lit_labeled_corpus.csv
+rclone hashsum md5 <remote>:<topic>_lit/$(date +%F)/<topic>_lit_labeled_corpus.csv  # prints remote md5 — compare against local md5sum to confirm the upload
 ```
 
 ## Common failures
