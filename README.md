@@ -7,6 +7,7 @@ Example use cases:
 - Structured identification of data coverage (e.g., publications per cell in covariate space) 
 - Simultaneous query of multiple disciplines' treatment of a common phenomenon
 - Triage of papers for full download
+- Identify bridge themes among multiple corpora (e.g., run litsweep twice and compare pubs in embedding space)
 
 This repo is meant to be a template that is copied for individual lit-search projects. Projects byte-copy the infra at scaffold time — don't
 edit them in-place if you want consistency across the family.
