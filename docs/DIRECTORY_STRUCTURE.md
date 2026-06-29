@@ -26,6 +26,7 @@ my-search-lit/                       # repo root; one project = one repo
 │   ├── label_with_stanford.py        # ★ topic-specific: SYSTEM_PROMPT inside
 │   ├── embed_diagnostic.py
 │   ├── build_filter_html.py          # labeled corpus -> self-contained faceted-filter HTML
+│   ├── dedup_labeled.py              # post-label cleanup: drop comments/replies + DOI/title collapse
 │   ├── merge_gap_fill.py
 │   ├── backfill_abstracts.py
 │   ├── disk_hygiene.py              # parquet-archive results/raw/ -> archive/

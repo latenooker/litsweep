@@ -104,6 +104,11 @@ TEMPLATED_FILES = [
     # derives facets from the `_llm` columns), so every project ships with
     # a zero-dependency way to browse its deliverable by facet.
     "scripts/build_filter_html.py",
+    # dedup_labeled.py is the post-label cleanup (drop comments/replies +
+    # DOI/title-Jaccard collapse) operating on the labeled CSV alone, so it
+    # works even after the embedding intermediates are archived. Slug-
+    # agnostic; reuses dedup.py's primitives.
+    "scripts/dedup_labeled.py",
     # merge_gap_fill.py merges a sibling-output dedup-merge into the
     # main bibliography (used for WoS-Expanded gap-fills, etc.).
     "scripts/merge_gap_fill.py",

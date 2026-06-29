@@ -384,6 +384,29 @@ python scripts/embed_filter.py \
     --out results/<slug>_bibliography_embedded.csv
 ```
 
+### Post-label cleanup — drop comments/replies + collapse duplicates
+
+The harvest-time `dedup.py` collapses obvious DOI/title duplicates, but
+journal **comments / replies** (OpenAlex type `peer-review`, plus titles
+like "Comment on …" / "Reply to …") and **preprint ↔ published** pairs
+with format-variant DOIs survive into the labeled corpus. Clean them with
+`dedup_labeled.py`, which drops comments/replies then collapses
+near-duplicates by DOI + title-Jaccard, keeping one canonical row per
+group (labeled > unlabeled, core > adjacent > off_topic, has-DOI, longest
+title). It needs only the labeled CSV — no embeddings — so it works even
+after `disk_hygiene` has archived the `*_embedded.*` intermediates.
+
+```bash
+# dry run — prints stats only
+python scripts/dedup_labeled.py --labeled results/<slug>_labeled_corpus.csv
+
+# persist results/<slug>_labeled_corpus_dedup.csv + a manifest
+python scripts/dedup_labeled.py \
+    --labeled results/<slug>_labeled_corpus.csv --write
+```
+
+`build_filter_html.py` (below) auto-prefers the `_dedup.csv` when present.
+
 ### Browse the corpus — faceted-filter HTML
 
 Once `results/<slug>_labeled_corpus.csv` exists, render a
