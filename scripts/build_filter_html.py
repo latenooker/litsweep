@@ -195,8 +195,13 @@ def _year(raw: str) -> int | None:
         return None
 
 
-def _link_and_doi(doi: str, oa: str) -> tuple[str, str]:
-    """Return (link_url, bare_doi) preferring DOI then open-access URL."""
+def _link_and_doi(doi: str, oa: str, ident: str = "") -> tuple[str, str]:
+    """Return (link_url, bare_doi) for a record.
+
+    Prefers the DOI; failing that, falls back to any other available URL —
+    the open-access URL, then the record ``id`` when it is itself a URL
+    (e.g. an OpenAlex ``https://openalex.org/W…`` landing page).
+    """
 
     doi = (doi or "").strip()
     bare = doi
@@ -207,7 +212,11 @@ def _link_and_doi(doi: str, oa: str) -> tuple[str, str]:
     if doi:
         link = doi if doi.lower().startswith("http") else f"https://doi.org/{doi}"
         return link, bare
-    return (oa or "").strip(), ""
+    for cand in (oa, ident):
+        cand = (cand or "").strip()
+        if cand.lower().startswith("http"):
+            return cand, ""
+    return "", ""
 
 
 _TEMPLATE = r"""<!doctype html>
@@ -502,9 +511,12 @@ function facetEl(f){
     s.value = valSearch.get(f.key) || "";
     s.addEventListener("input", e => {
       valSearch.set(f.key, e.target.value);
+      const caret = [e.target.selectionStart, e.target.selectionEnd];
       const nd = facetEl(f);
       nd.open = true;
       d.replaceWith(nd);
+      const ns = nd.querySelector(".valsearch");
+      if(ns){ ns.focus(); try{ ns.setSelectionRange(caret[0], caret[1]); }catch(_){} }
     });
     vals.appendChild(s);
   }
@@ -579,8 +591,25 @@ function esc(s){
 }
 
 function update(){
+  // buildFacets() recreates the sidebar DOM, so a field being typed in
+  // (e.g. the year inputs) loses focus every keystroke. Capture the
+  // focused element by id and restore focus + caret after the rebuild.
+  const act = document.activeElement;
+  let keep = null;
+  if(act && act.id){
+    let s = null, e = null;
+    try{ s = act.selectionStart; e = act.selectionEnd; }catch(_){}  // number inputs
+    keep = {id: act.id, s, e};
+  }
   buildFacets();
   renderResults(finalMatches());
+  if(keep){
+    const el = document.getElementById(keep.id);
+    if(el){
+      el.focus();
+      try{ if(keep.s != null) el.setSelectionRange(keep.s, keep.e); }catch(_){}
+    }
+  }
 }
 
 let sortKey = "year-desc";
@@ -707,7 +736,8 @@ def _build(paths: list[Path], keep: set[str] | None) -> tuple[list[dict], list[s
             for row in reader:
                 if keep is not None and row.get(_RELEVANCE_COL) not in keep:
                     continue
-                link, bare_doi = _link_and_doi(row.get(_DOI_COL, ""), row.get(_OA_COL, ""))
+                link, bare_doi = _link_and_doi(
+                    row.get(_DOI_COL, ""), row.get(_OA_COL, ""), row.get("id", ""))
                 facets_raw = {}
                 for col in _facet_columns(headers):
                     cell = (row.get(col, "") or "").strip()
