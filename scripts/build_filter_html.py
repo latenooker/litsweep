@@ -285,6 +285,11 @@ _TEMPLATE = r"""<!doctype html>
     border-radius:7px; padding:8px 12px; cursor:pointer; font-size:13px;
   }
   button.export:hover{border-color:var(--accent2)}
+  label.strict{
+    display:flex; align-items:center; gap:6px; font-size:12.5px;
+    color:var(--mut); cursor:pointer; user-select:none;
+  }
+  label.strict input{accent-color:var(--accent); margin:0}
   .layout{display:flex; height:calc(100% - 59px); position:relative}
   aside{
     width:330px; flex:none; overflow-y:auto; border-right:1px solid var(--line);
@@ -383,6 +388,9 @@ _TEMPLATE = r"""<!doctype html>
     <option value="author-asc">Author A–Z</option>
     <option value="title-asc">Title A–Z</option>
   </select>
+  <label class="strict" title="Off (default): a facet only filters the corpora that use it; records from other corpora pass through. On: those records are dropped (strict cross-corpus filtering).">
+    <input type="checkbox" id="strict"> Drop unfaceted
+  </label>
   <button class="reset" id="reset">Reset filters</button>
   <button class="export" id="exportBib" title="Download current results as BibTeX">Export .bib</button>
   <button class="export" id="exportCsv" title="Download current results as CSV">Export .csv</button>
@@ -419,6 +427,7 @@ document.getElementById("total").textContent = RECS.length.toLocaleString();
 // active selections: facetKey -> Set(values); plus year range + text query
 const sel = new Map();
 let yearMin = null, yearMax = null, query = "";
+let strictFacets = false;               // drop records whose corpus lacks a selected facet
 const valSearch = new Map();            // facetKey -> in-facet search text
 
 function facetVal(rec, key){
@@ -429,8 +438,9 @@ function facetVal(rec, key){
 
 // does a record match a single facet's selected set?
 function matchFacet(rec, key, chosen){
-  // a facet not in this record's corpus schema doesn't constrain it
-  if(!facetApplies(rec.co, key)) return true;
+  // a facet not in this record's corpus schema doesn't constrain it,
+  // unless "drop unfaceted records" (strict) is on
+  if(!facetApplies(rec.co, key)) return !strictFacets;
   const v = facetVal(rec, key);
   if(v === undefined) return false;
   if(Array.isArray(v)) return v.some(x => chosen.has(x));
@@ -750,6 +760,10 @@ document.getElementById("exportBib").addEventListener("click", () => {
 document.getElementById("exportCsv").addEventListener("click", () => {
   const m = sortRecs(finalMatches());
   download(`articles_${m.length}.csv`, toCsv(m), "text/csv;charset=utf-8");
+});
+document.getElementById("strict").addEventListener("change", e => {
+  strictFacets = e.target.checked;
+  update();
 });
 document.getElementById("reset").addEventListener("click", () => {
   sel.clear(); valSearch.clear();
