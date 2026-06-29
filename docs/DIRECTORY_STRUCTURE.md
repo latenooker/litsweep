@@ -25,6 +25,7 @@ my-search-lit/                       # repo root; one project = one repo
 │   ├── embed_filter.py               # ★ topic-specific: ANCHORS list inside
 │   ├── label_with_stanford.py        # ★ topic-specific: SYSTEM_PROMPT inside
 │   ├── embed_diagnostic.py
+│   ├── build_filter_html.py          # labeled corpus -> self-contained faceted-filter HTML
 │   ├── merge_gap_fill.py
 │   ├── backfill_abstracts.py
 │   ├── disk_hygiene.py              # parquet-archive results/raw/ -> archive/

@@ -384,6 +384,32 @@ python scripts/embed_filter.py \
     --out results/<slug>_bibliography_embedded.csv
 ```
 
+### Browse the corpus — faceted-filter HTML
+
+Once `results/<slug>_labeled_corpus.csv` exists, render a
+self-contained interface to filter it by facet and pull out links:
+
+```bash
+# Auto-detects results/*_labeled_corpus.csv; keeps core+adjacent by
+# default. Writes results/analysis/articles_filter.html.
+python scripts/build_filter_html.py
+
+# Keep everything, custom title:
+python scripts/build_filter_html.py --relevance all --title "My corpus"
+
+# Combine sibling corpora that share an embedding space (adds a
+# "corpus" facet):
+python scripts/build_filter_html.py \
+    --csv results/<slug>_labeled_corpus.csv \
+          ../sibling/results/<sibling>_labeled_corpus.csv
+```
+
+The facets are derived from the data — every `_llm` column becomes a
+facet (pipe-separated cells → multi-select, `True`/`False` → boolean),
+so it adapts to whatever your `SYSTEM_PROMPT` schema emits. The output
+is a single static HTML (no server, no dependencies); each result links
+to its DOI (or open-access URL). Abstracts are omitted by design.
+
 ## Step 4 — iterate
 
 After the first labeled-corpus pass:
