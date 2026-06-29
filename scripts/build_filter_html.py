@@ -407,10 +407,23 @@ function matchYear(rec){
   return true;
 }
 
+// Split the query into terms, honoring "quoted phrases" as single terms.
+// Stray/curly quotes are normalised or dropped so a lone quote never blocks
+// matching (e.g. an unclosed "frost behaves like the bare word frost).
+function queryTokens(q){
+  q = q.replace(/[“”]/g, '"');
+  const toks = []; const re = /"([^"]+)"|(\S+)/g; let m;
+  while((m = re.exec(q))){
+    const t = (m[1] !== undefined ? m[1] : m[2].replace(/"/g, "")).trim();
+    if(t) toks.push(t);
+  }
+  return toks;
+}
+
 function matchQuery(rec){
   if(!query) return true;
   const hay = (rec.ti + " " + rec.au + " " + rec.jo + " " + rec.doi).toLowerCase();
-  return query.split(/\s+/).every(t => hay.includes(t));
+  return queryTokens(query).every(t => hay.includes(t));
 }
 
 // records passing all facets EXCEPT `exceptKey` (for counting that facet),
