@@ -40,12 +40,31 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
 import json
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 csv.field_size_limit(10**9)
+
+# Inline formatting tags that leak into bibliographic metadata (HTML and
+# JATS/MathML namespaces). Stripped from titles etc. so display and exports
+# are clean text.
+_TAG_RE = re.compile(
+    r"</?(?:b|i|em|strong|sub|sup|u|sc|span|tt|br|p|a|inf|sb|sp|"
+    r"mml:\w+|jats:\w+)\b[^>]*>",
+    re.I,
+)
+
+
+def _clean_text(raw: str) -> str:
+    """Unescape entities, strip inline HTML/JATS tags, collapse whitespace."""
+
+    s = html.unescape((raw or "").strip())
+    s = _TAG_RE.sub("", s)
+    return " ".join(s.split())
 
 # Display columns pulled straight from each row (never facets in themselves,
 # beyond what is added below). Abstract is deliberately excluded.
@@ -177,12 +196,6 @@ def _split_list(raw: str) -> list[str]:
     return [v.strip() for v in raw.split(sep) if v.strip()]
 
 
-def _first_author(raw: str) -> str:
-    """Return the first author from a `;`-separated authors string."""
-
-    return (raw or "").split(";")[0].strip()
-
-
 def _year(raw: str) -> int | None:
     """Parse a possibly-float year string to an int, or None."""
 
@@ -267,6 +280,11 @@ _TEMPLATE = r"""<!doctype html>
     border-radius:7px; padding:8px 12px; cursor:pointer; font-size:13px;
   }
   button.reset:hover{border-color:var(--accent)}
+  button.export{
+    background:var(--chip); border:1px solid var(--line); color:var(--accent2);
+    border-radius:7px; padding:8px 12px; cursor:pointer; font-size:13px;
+  }
+  button.export:hover{border-color:var(--accent2)}
   .layout{display:flex; height:calc(100% - 59px); position:relative}
   aside{
     width:330px; flex:none; overflow-y:auto; border-right:1px solid var(--line);
@@ -361,6 +379,8 @@ _TEMPLATE = r"""<!doctype html>
     <option value="title-asc">Title A–Z</option>
   </select>
   <button class="reset" id="reset">Reset filters</button>
+  <button class="export" id="exportBib" title="Download current results as BibTeX">Export .bib</button>
+  <button class="export" id="exportCsv" title="Download current results as CSV">Export .csv</button>
 </header>
 <div class="layout">
   <div class="backdrop" id="backdrop"></div>
@@ -589,7 +609,7 @@ function renderResults(matches){
     const doiHtml = r.doi ? ` · <span class="doi">${esc(r.doi)}</span>` : "";
     const jo = r.jo ? ` · ${esc(r.jo)}` : "";
     li.innerHTML = `${badge}${titleHtml}
-      <div class="meta"><span class="au">${esc(r.au)||'—'}</span> · ${r.yr ?? 'n.d.'}${jo}${doiHtml}</div>`;
+      <div class="meta"><span class="au">${esc(firstAuthor(r.au))||'—'}</span> · ${r.yr ?? 'n.d.'}${jo}${doiHtml}</div>`;
     frag.appendChild(li);
   }
   resultsEl.appendChild(frag);
@@ -601,6 +621,62 @@ function renderResults(matches){
 function esc(s){
   return (s||"").replace(/[&<>"]/g, c =>
     ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+}
+
+function firstAuthor(s){ return (s || "").split(";")[0].trim(); }
+
+// ---- export the current (filtered + sorted) results ----
+function csvCell(v){
+  v = v == null ? "" : String(v);
+  return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+function toCsv(recs){
+  const cols = ["corpus","authors","year","journal","title","doi","url","relevance"];
+  const rows = [cols.join(",")];
+  for(const r of recs){
+    rows.push([r.co, r.au, r.yr ?? "", r.jo, r.ti, r.doi, r.ln, r.fx.relevance || ""]
+      .map(csvCell).join(","));
+  }
+  return rows.join("\r\n") + "\r\n";
+}
+const BIBTYPE = {article:"article", review:"article", preprint:"article",
+  editorial:"article", research:"article", thesis:"phdthesis", book:"book",
+  "book-chapter":"incollection", proceedings:"inproceedings", report:"techreport"};
+function bibField(name, val){
+  return val ? `,\n  ${name} = {${String(val).replace(/[{}]/g, "")}}` : "";
+}
+function toBib(recs){
+  const seen = {}, out = [];
+  for(const r of recs){
+    const type = BIBTYPE[r.fx.type] || "misc";
+    const fa = firstAuthor(r.au);
+    const root = ((fa.split(/\s+/).pop() || "anon") + (r.yr || ""))
+      .replace(/[^A-Za-z0-9]/g, "") || "ref";
+    let key = root, n = 0;
+    while(seen[key]){ key = root + String.fromCharCode(97 + n); n++; }
+    seen[key] = 1;
+    const authors = r.au.split(";").map(x => x.trim()).filter(Boolean).join(" and ");
+    const venueField = type === "phdthesis" ? "school"
+      : (type === "incollection" || type === "inproceedings") ? "booktitle" : "journal";
+    let e = `@${type}{${key}`;
+    e += bibField("author", authors);
+    e += bibField("title", r.ti);
+    e += bibField("year", r.yr);
+    e += bibField(venueField, r.jo);
+    e += bibField("doi", r.doi);
+    e += bibField("url", r.ln);
+    e += "\n}";
+    out.push(e);
+  }
+  return out.join("\n\n") + "\n";
+}
+function download(name, text, mime){
+  const blob = new Blob([text], {type: mime});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
 function update(){
@@ -645,6 +721,14 @@ document.getElementById("q").addEventListener("input", e => {
 document.getElementById("sort").addEventListener("change", e => {
   sortKey = e.target.value;
   renderResults(finalMatches());
+});
+document.getElementById("exportBib").addEventListener("click", () => {
+  const m = sortRecs(finalMatches());
+  download(`articles_${m.length}.bib`, toBib(m), "application/x-bibtex");
+});
+document.getElementById("exportCsv").addEventListener("click", () => {
+  const m = sortRecs(finalMatches());
+  download(`articles_${m.length}.csv`, toCsv(m), "text/csv;charset=utf-8");
 });
 document.getElementById("reset").addEventListener("click", () => {
   sel.clear(); valSearch.clear();
@@ -760,10 +844,10 @@ def _build(paths: list[Path], keep: set[str] | None) -> tuple[list[dict], list[s
                 raw_records.append(
                     {
                         "co": corpus,
-                        "au": _first_author(row.get(_AUTHORS_COL, "")),
+                        "au": _clean_text(row.get(_AUTHORS_COL, "")),
                         "yr": _year(row.get(_YEAR_COL, "")),
-                        "jo": (row.get(_JOURNAL_COL, "") or "").strip(),
-                        "ti": (row.get(_TITLE_COL, "") or "").strip(),
+                        "jo": _clean_text(row.get(_JOURNAL_COL, "")),
+                        "ti": _clean_text(row.get(_TITLE_COL, "")),
                         "ln": link,
                         "doi": bare_doi,
                         "_raw": facets_raw,
