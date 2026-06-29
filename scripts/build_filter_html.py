@@ -324,6 +324,11 @@ _TEMPLATE = r"""<!doctype html>
   details.facet>summary::-webkit-details-marker{display:none}
   details.facet>summary:hover{background:var(--panel2)}
   .facet .flabel{font-weight:600; font-size:13px}
+  .fscope{
+    font-size:10.5px; color:var(--mut); background:var(--bg);
+    border:1px solid var(--line); border-radius:10px; padding:0 5px;
+    margin-left:4px; font-weight:600; cursor:help;
+  }
   .facet .fmeta{color:var(--mut); font-size:11.5px; font-variant-numeric:tabular-nums}
   .facet.active{border-color:var(--accent)}
   .facet.active .flabel{color:var(--accent)}
@@ -394,9 +399,20 @@ _TEMPLATE = r"""<!doctype html>
 <script>
 "use strict";
 const PAYLOAD = JSON.parse(document.getElementById("data").textContent);
-const FACETS = PAYLOAD.facets;          // [{key,label,group}]
+const FACETS = PAYLOAD.facets;          // [{key,label,group,corpora?}]
 const RECS = PAYLOAD.records;           // [{co,au,yr,jo,ti,ln,doi,fx}]
 const CAP = 1000;                       // max results rendered at once
+
+// Corpora present, and which facets are scoped to only some of them. A
+// facet absent from a corpus's schema must not exclude that corpus's
+// records (else cross-corpus matches are false-negatived away).
+const CORPORA = [...new Set(RECS.map(r => r.co))];
+const FACET_CORPORA = {};
+for(const f of FACETS) if(f.corpora) FACET_CORPORA[f.key] = new Set(f.corpora);
+function facetApplies(co, key){
+  const s = FACET_CORPORA[key];
+  return !s || s.has(co);
+}
 
 document.getElementById("total").textContent = RECS.length.toLocaleString();
 
@@ -413,6 +429,8 @@ function facetVal(rec, key){
 
 // does a record match a single facet's selected set?
 function matchFacet(rec, key, chosen){
+  // a facet not in this record's corpus schema doesn't constrain it
+  if(!facetApplies(rec.co, key)) return true;
   const v = facetVal(rec, key);
   if(v === undefined) return false;
   if(Array.isArray(v)) return v.some(x => chosen.has(x));
@@ -527,8 +545,11 @@ function facetEl(f){
   if(counts.size === 0){ d.style.display = "none"; return d; }
   d.open = chosen.size > 0;
 
+  const scopeHtml = (f.corpora && CORPORA.length > 1)
+    ? ` <span class="fscope" title="Only ${f.corpora.join(', ')} label this facet — records from the other corpora are not filtered by it, so cross-corpus matches aren't dropped.">${f.corpora.length}/${CORPORA.length}</span>`
+    : "";
   d.innerHTML = `<summary>
-      <span class="flabel">${f.label}</span>
+      <span class="flabel">${f.label}${scopeHtml}</span>
       <span class="fmeta">${chosen.size ? chosen.size + " sel · " : ""}${counts.size}</span>
     </summary>`;
 
@@ -880,9 +901,22 @@ def _facet_config(facet_cols: list[str], records: list[dict]) -> list[dict]:
     for r in records:
         nonempty.update(r["fx"].keys())
 
+    # which corpora carry a value for each facet key; a facet used by a
+    # strict subset gets a `corpora` list so the client won't exclude
+    # records from corpora that never had the facet (cross-corpus search).
+    all_corpora = {r["co"] for r in records}
+    facet_corpora: dict[str, set[str]] = {}
+    for r in records:
+        for key in r["fx"]:
+            facet_corpora.setdefault(key, set()).add(r["co"])
+
     def entry(col: str, group: str) -> dict:
-        return {"key": "corpus" if col == "corpus" else col,
-                "label": _label_for(col), "group": group}
+        key = "corpus" if col == "corpus" else col
+        d = {"key": key, "label": _label_for(col), "group": group}
+        owners = facet_corpora.get(key)
+        if owners is not None and len(owners) < len(all_corpora):
+            d["corpora"] = sorted(owners)
+        return d
 
     general = [c for c in _GENERAL_ORDER if c in facet_cols and c in nonempty]
     rest = [c for c in facet_cols if c not in _GENERAL_ORDER and c in nonempty
