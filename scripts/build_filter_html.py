@@ -243,18 +243,44 @@ _TEMPLATE = r"""<!doctype html>
     padding:9px 12px; font-size:14px;
   }
   #q::placeholder{color:var(--mut)}
+  #sort{
+    background:var(--panel); border:1px solid var(--line); color:var(--ink);
+    border-radius:7px; padding:8px 9px; font-size:13px; cursor:pointer;
+  }
+  button.toggle{
+    background:var(--chip); border:1px solid var(--line); color:var(--ink);
+    border-radius:7px; padding:8px 11px; cursor:pointer; font-size:13px; flex:none;
+  }
+  button.toggle:hover{border-color:var(--accent)}
   .count{color:var(--accent2); font-variant-numeric:tabular-nums; font-weight:600}
   button.reset{
     background:var(--chip); border:1px solid var(--line); color:var(--ink);
     border-radius:7px; padding:8px 12px; cursor:pointer; font-size:13px;
   }
   button.reset:hover{border-color:var(--accent)}
-  .layout{display:flex; height:calc(100% - 59px)}
+  .layout{display:flex; height:calc(100% - 59px); position:relative}
   aside{
     width:330px; flex:none; overflow-y:auto; border-right:1px solid var(--line);
     padding:8px 4px 40px 0;
   }
   main{flex:1; overflow-y:auto; padding:6px 18px 60px}
+  .layout.hide-facets aside{display:none}
+  .backdrop{display:none}
+  @media (max-width:720px){
+    header{padding:10px 12px; gap:9px}
+    header h1{font-size:14px; width:100%; order:-1}
+    #q{min-width:140px}
+    aside{
+      position:absolute; top:0; left:0; bottom:0; width:88%; max-width:330px;
+      z-index:30; background:var(--bg);
+      box-shadow:6px 0 22px rgba(0,0,0,.55);
+    }
+    main{padding:6px 12px 60px}
+    .layout:not(.hide-facets) .backdrop{
+      display:block; position:absolute; inset:0; z-index:20;
+      background:rgba(0,0,0,.45);
+    }
+  }
   .group{margin:6px 10px 14px}
   .group h2{
     font-size:11px; text-transform:uppercase; letter-spacing:.7px;
@@ -315,12 +341,20 @@ _TEMPLATE = r"""<!doctype html>
 </head>
 <body>
 <header>
+  <button class="toggle" id="toggle" aria-label="Toggle filters">☰ Filters</button>
   <h1>__PAGE_TITLE__</h1>
   <input id="q" placeholder="Search title, author, journal, DOI…">
   <span class="sub"><span id="count" class="count">0</span> of <span id="total">0</span> articles</span>
+  <select id="sort" title="Sort results">
+    <option value="year-desc">Year ↓ newest</option>
+    <option value="year-asc">Year ↑ oldest</option>
+    <option value="author-asc">Author A–Z</option>
+    <option value="title-asc">Title A–Z</option>
+  </select>
   <button class="reset" id="reset">Reset filters</button>
 </header>
 <div class="layout">
+  <div class="backdrop" id="backdrop"></div>
   <aside id="facets"></aside>
   <main>
     <ul class="results" id="results"></ul>
@@ -516,7 +550,7 @@ function renderResults(matches){
     moreEl.textContent = "";
     return;
   }
-  const sorted = matches.slice().sort((a, b) => (b.yr||0) - (a.yr||0));
+  const sorted = sortRecs(matches);
   const shown = sorted.slice(0, CAP);
   const frag = document.createDocumentFragment();
   for(const r of shown){
@@ -549,9 +583,26 @@ function update(){
   renderResults(finalMatches());
 }
 
+let sortKey = "year-desc";
+function sortRecs(matches){
+  const a = matches.slice();
+  const lc = s => (s || "~").toLowerCase();
+  switch(sortKey){
+    case "year-asc":   a.sort((p, q) => (p.yr || 99999) - (q.yr || 99999)); break;
+    case "author-asc": a.sort((p, q) => lc(p.au).localeCompare(lc(q.au))); break;
+    case "title-asc":  a.sort((p, q) => lc(p.ti).localeCompare(lc(q.ti))); break;
+    default:           a.sort((p, q) => (q.yr || 0) - (p.yr || 0));
+  }
+  return a;
+}
+
 document.getElementById("q").addEventListener("input", e => {
   query = e.target.value.trim().toLowerCase();
   update();
+});
+document.getElementById("sort").addEventListener("change", e => {
+  sortKey = e.target.value;
+  renderResults(finalMatches());
 });
 document.getElementById("reset").addEventListener("click", () => {
   sel.clear(); valSearch.clear();
@@ -559,6 +610,20 @@ document.getElementById("reset").addEventListener("click", () => {
   document.getElementById("q").value = "";
   update();
 });
+
+// Collapsible filter pane: defaults open on desktop, closed on mobile.
+const layout = document.querySelector(".layout");
+const mq = window.matchMedia("(max-width: 720px)");
+function setFilters(open){ layout.classList.toggle("hide-facets", !open); }
+let filtersOpen = !mq.matches;
+setFilters(filtersOpen);
+document.getElementById("toggle").addEventListener("click", () => {
+  filtersOpen = !filtersOpen; setFilters(filtersOpen);
+});
+document.getElementById("backdrop").addEventListener("click", () => {
+  filtersOpen = false; setFilters(false);
+});
+mq.addEventListener("change", e => { filtersOpen = !e.matches; setFilters(filtersOpen); });
 
 update();
 </script>
