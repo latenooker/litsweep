@@ -407,8 +407,26 @@ python scripts/build_filter_html.py \
 The facets are derived from the data — every `_llm` column becomes a
 facet (pipe-separated cells → multi-select, `True`/`False` → boolean),
 so it adapts to whatever your `SYSTEM_PROMPT` schema emits. The output
-is a single static HTML (no server, no dependencies); each result links
-to its DOI (or open-access URL). Abstracts are omitted by design.
+is a single static HTML with no server and no dependencies.
+
+In the browser you can:
+
+- **Filter** by any facet — counts update live, and a facet hides
+  itself when no record under the current selection has a value
+  (corpus-aware) — plus a numeric **year range**.
+- **Search** title / author / journal / DOI; `"quoted phrases"` match
+  as exact substrings and bare words are AND-ed together.
+- **Sort** by year (newest / oldest), author, or title.
+- **Export** the current filtered + sorted set (the whole match set,
+  not just the rows on screen) to **`.csv`** or **`.bib`** (BibTeX,
+  with doc-type-aware entry types and deduped cite keys).
+- Collapse the **filter pane** with the header toggle; on screens
+  ≤ 720 px it becomes an overlay drawer (closed by default) for mobile.
+
+Each result links to its DOI, falling back to the open-access URL, then
+to the record `id` when that is itself a URL (e.g. an OpenAlex landing
+page). Titles are stripped of stray HTML/JATS markup; abstracts are
+omitted by design.
 
 ## Step 4 — iterate
 
