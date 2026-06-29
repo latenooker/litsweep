@@ -357,6 +357,21 @@ _TEMPLATE = r"""<!doctype html>
     border-radius:6px; padding:5px 7px; font-size:12.5px;
   }
   .yearrow span{color:var(--mut)}
+  details.help{
+    background:var(--panel); border:1px solid var(--line); border-radius:8px;
+    margin:2px 0 14px;
+  }
+  details.help>summary{
+    list-style:none; cursor:pointer; padding:9px 11px; color:var(--accent);
+    font-weight:600; font-size:13px;
+  }
+  details.help>summary::-webkit-details-marker{display:none}
+  details.help .help-body{padding:0 13px 12px; font-size:13px}
+  details.help .help-body p{margin:7px 0; color:var(--mut)}
+  details.help .help-body ul{margin:7px 0; padding-left:18px}
+  details.help .help-body li{margin:6px 0; color:var(--mut)}
+  details.help .help-body b{color:var(--ink); font-weight:600}
+  details.help .help-body .fscope{cursor:default}
   ul.results{list-style:none; margin:0; padding:0}
   li.rec{
     padding:10px 6px; border-bottom:1px solid var(--line);
@@ -399,6 +414,26 @@ _TEMPLATE = r"""<!doctype html>
   <div class="backdrop" id="backdrop"></div>
   <aside id="facets"></aside>
   <main>
+    <details class="help" id="help" open>
+      <summary>ℹ︎ How cross-corpus filtering works</summary>
+      <div class="help-body">
+        <p>This view combines several corpora that don't all use the same
+        facets. Hover most controls (facet pills, the <b>Drop unfaceted</b>
+        box, the export buttons) for a tooltip. Two things matter when
+        filtering across corpora:</p>
+        <ul>
+          <li><b>Scope pills.</b> A facet tagged
+          <span class="fscope">N/M</span> is defined by only N of the M
+          corpora. Records from the other corpora have no value for it, so by
+          default they are <b>not</b> filtered by that facet — that way a
+          relevant paper isn't dropped just because its corpus never had the
+          facet. Hover a pill to see which corpora it applies to.</li>
+          <li><b>Drop unfaceted.</b> Tick this box in the header to instead
+          <b>hide</b> those other-corpus records — strict filtering that keeps
+          only records actually carrying the selected facet.</li>
+        </ul>
+      </div>
+    </details>
     <ul class="results" id="results"></ul>
     <div id="more" class="more"></div>
   </main>
@@ -420,6 +455,13 @@ for(const f of FACETS) if(f.corpora) FACET_CORPORA[f.key] = new Set(f.corpora);
 function facetApplies(co, key){
   const s = FACET_CORPORA[key];
   return !s || s.has(co);
+}
+
+// The cross-corpus help box and the "Drop unfaceted" control only make
+// sense when several corpora are combined; hide them for a single corpus.
+if(CORPORA.length <= 1){
+  const h = document.getElementById("help"); if(h) h.style.display = "none";
+  const sl = document.querySelector("label.strict"); if(sl) sl.style.display = "none";
 }
 
 document.getElementById("total").textContent = RECS.length.toLocaleString();
