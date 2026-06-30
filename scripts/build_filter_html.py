@@ -881,12 +881,29 @@ def _facet_cell(kind: str, raw: str, col: str):
     return None if raw.lower() in _DROP_VALUES else raw
 
 
-def _build(paths: list[Path], keep: set[str] | None) -> tuple[list[dict], list[str], dict[str, str]]:
+_HAYSTACK_FIELDS = ("title", "title_english_translation", "abstract",
+                    "abstract_snippet", "notes")
+
+
+def _row_haystack(row: dict) -> str:
+    """Lowercased text of a row's semantic fields, for --match filtering."""
+
+    parts = [row.get(c, "") or "" for c in _HAYSTACK_FIELDS]
+    parts += [(v or "") for k, v in row.items()
+              if k.endswith("_mentioned") or k.endswith("_llm")]
+    return " ".join(parts).lower()
+
+
+def _build(paths: list[Path], keep: set[str] | None,
+           match_groups: list | None = None
+           ) -> tuple[list[dict], list[str], dict[str, str]]:
     """Read corpora and return (records, facet columns, kinds).
 
     Args:
         paths: labeled-corpus CSVs to read.
         keep: allowed ``relevance_llm`` values, or None to keep all.
+        match_groups: compiled regexes; a row is kept only if every regex
+            matches its text (alternation within one regex gives OR).
     """
 
     multi = len(paths) > 1
@@ -910,6 +927,10 @@ def _build(paths: list[Path], keep: set[str] | None) -> tuple[list[dict], list[s
             for row in reader:
                 if keep is not None and row.get(_RELEVANCE_COL) not in keep:
                     continue
+                if match_groups:
+                    hay = _row_haystack(row)
+                    if not all(rx.search(hay) for rx in match_groups):
+                        continue
                 link, bare_doi = _link_and_doi(
                     row.get(_DOI_COL, ""), row.get(_OA_COL, ""), row.get("id", ""))
                 facets_raw = {}
@@ -1008,6 +1029,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                    help="output HTML path (default results/analysis/articles_filter.html)")
     p.add_argument("--relevance", default="core,adjacent",
                    help="comma list of relevance_llm values to keep, or 'all' (default: core,adjacent)")
+    p.add_argument("--match", action="append", default=None, metavar="REGEX",
+                   help="keep only records whose text (title/abstract/notes/"
+                        "facets) matches REGEX; repeatable — a record must "
+                        "match ALL --match groups (use a|b within one for OR)")
     p.add_argument("--title", default="Lit-search corpus filter",
                    help="page title shown in the header")
     return p.parse_args(argv)
@@ -1023,10 +1048,13 @@ def main(argv: list[str] | None = None) -> None:
     keep = None if args.relevance.strip().lower() == "all" else {
         v.strip() for v in args.relevance.split(",") if v.strip()
     }
+    match_groups = ([re.compile(m, re.I) for m in args.match]
+                    if args.match else None)
 
     print(f"Reading {len(paths)} corpus file(s)"
-          + ("" if keep is None else f" (relevance in {sorted(keep)}):"))
-    records, facet_cols, _ = _build(paths, keep)
+          + ("" if keep is None else f" (relevance in {sorted(keep)})")
+          + (f" matching {len(match_groups)} pattern group(s)" if match_groups else ""))
+    records, facet_cols, _ = _build(paths, keep, match_groups)
     print(f"Total records: {len(records)}")
 
     config = _facet_config(facet_cols, records)

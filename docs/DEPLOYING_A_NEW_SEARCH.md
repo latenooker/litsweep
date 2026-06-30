@@ -420,6 +420,15 @@ python scripts/build_filter_html.py
 # Keep everything, custom title:
 python scripts/build_filter_html.py --relevance all --title "My corpus"
 
+# Focused subset: keep only records matching ALL --match groups (regex,
+# case-insensitive, over title/abstract/notes/facets; a|b within a group
+# is OR). E.g. a second file limited to weathering + SEM entries:
+python scripts/build_filter_html.py \
+    --match '\bsem\b|scanning electron|exoscop' \
+    --match 'weather|dissolution|\betch|saprolit' \
+    --out results/analysis/articles_filter_weathering_sem.html \
+    --title "Weathering + SEM"
+
 # Combine sibling corpora that share an embedding space (adds a
 # "corpus" facet):
 python scripts/build_filter_html.py \
