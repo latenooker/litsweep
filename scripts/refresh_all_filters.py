@@ -91,6 +91,12 @@ BUILDS: tuple[Build, ...] = (
         csv=("soilmag/results/soilmag_lit_labeled_corpus.csv",),
     ),
     Build(
+        name="char14c",
+        out="char14c/results/analysis/articles_filter.html",
+        title="Charcoal radiocarbon (14C) dating literature",
+        csv=("char14c/results/char14c_labeled_corpus.csv",),
+    ),
+    Build(
         name="pparadox",
         out="pparadox-lit/results/articles_filter.html",
         title="Particle-paradox literature (4 corpora)",
