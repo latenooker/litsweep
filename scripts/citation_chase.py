@@ -16,8 +16,8 @@ Seeds are the union of:
 Usage::
 
     python scripts/citation_chase.py \
-        --labeled results/native_sand_bibliography_labeled.csv \
-        --bib-csv results/native_sand_bibliography.csv \
+        --labeled results/litsweep_bibliography_labeled.csv \
+        --bib-csv results/litsweep_bibliography.csv \
         --top-n 20
 
 Idempotent: dedups by id and DOI against the existing bibliography.
@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import api_clients  # noqa: E402
 import dedup as dedup_mod  # noqa: E402
-import native_sand_search as M  # noqa: E402
+import litsweep_search as M  # noqa: E402
 
 logger = logging.getLogger("citation_chase")
 
@@ -335,11 +335,11 @@ def merge_into_bibliography(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--labeled", type=Path,
-                        default=Path("results/native_sand_bibliography_labeled.csv"))
+                        default=Path("results/litsweep_bibliography_labeled.csv"))
     parser.add_argument("--bib-csv", type=Path,
-                        default=Path("results/native_sand_bibliography.csv"))
+                        default=Path("results/litsweep_bibliography.csv"))
     parser.add_argument("--bib-bib", type=Path,
-                        default=Path("results/native_sand_bibliography.bib"))
+                        default=Path("results/litsweep_bibliography.bib"))
     parser.add_argument("--top-n", type=int, default=20,
                         help="Auto-select N highest-score core records as seeds.")
     parser.add_argument("--cap-per-seed", type=int, default=500,

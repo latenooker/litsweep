@@ -114,7 +114,13 @@ def dedup(
         return out
 
     df = df.copy()
-    df["_norm_doi"] = df["doi"].map(normalize_doi)
+    # Use a list comprehension, NOT Series.map: .map skips NaN (na_action),
+    # leaving the np.nan singleton in place. Because np.nan is truthy AND
+    # `np.nan in {np.nan: ...}` matches by identity, every DOI-less record
+    # (doi=None coerced to NaN once real DOIs share the column) would collapse
+    # into a single "phantom-DOI" bucket. Calling normalize_doi on every value
+    # coerces None/NaN/"" to a falsy None so the DOI-exact pass skips them.
+    df["_norm_doi"] = [normalize_doi(x) for x in df["doi"].tolist()]
 
     # Track which output index each original row maps to.
     out_rows: list[dict] = []
@@ -169,6 +175,11 @@ def dedup(
 
     for _, row in df.iterrows():
         norm_doi = row["_norm_doi"]
+        # iterrows re-coerces a stored None back to NaN. A bare NaN is truthy
+        # AND `np.nan in {np.nan: ...}` matches by identity, so without this
+        # guard every DOI-less record collapses into one phantom-DOI bucket.
+        if pd.isna(norm_doi):
+            norm_doi = None
         sources = _row_sources(row)
 
         # Pass 1: DOI exact match.
