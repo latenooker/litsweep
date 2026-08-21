@@ -407,10 +407,13 @@ python scripts/dedup_labeled.py \
 
 `build_filter_html.py` (below) auto-prefers the `_dedup.csv` when present.
 
-### Browse the corpus — faceted-filter HTML
+## Step 4 — browse the corpus (faceted-filter HTML)
 
-Once `results/<slug>_labeled_corpus.csv` exists, render a
-self-contained interface to filter it by facet and pull out links:
+The labeled CSV is the machine deliverable; this is how a **human**
+reads it. Once `results/<slug>_labeled_corpus.csv` exists, render a
+self-contained interface to filter it by facet and pull out links —
+zero dependencies, no server, one static file you can email or open
+straight from disk:
 
 ```bash
 # Auto-detects results/*_labeled_corpus.csv; keeps core+adjacent by
@@ -460,7 +463,7 @@ to the record `id` when that is itself a URL (e.g. an OpenAlex landing
 page). Titles are stripped of stray HTML/JATS markup; abstracts are
 omitted by design.
 
-## Step 4 — iterate
+## Step 5 — iterate
 
 After the first labeled-corpus pass:
 
@@ -483,7 +486,7 @@ After the first labeled-corpus pass:
    the merged corpus to extend the embedding matrix; re-run any
    downstream analyses.
 
-## Step 5 — back up
+## Step 6 — back up
 
 The pipeline produces large derivative artifacts (~200 MB embedded
 CSV, ~80 MB .npy matrix, ~200 MB labeled corpus on a 20k-row run).
@@ -528,7 +531,7 @@ norms.
 > `*_bibliography*` / `*_labeled_corpus*` / embeddings /
 > checkpoint files.
 
-## Step 6 — (optional) cross-project bridge
+## Step 7 — (optional) cross-project bridge
 
 If you have two related projects, both encoded with the same Ollama
 BGE-M3, you can compute a semantic bridge between their core sets.

@@ -36,7 +36,10 @@ Flags:
 - `--no-git` — skip the entire git workflow.
 
 Then fill in the four topic-specific files (queries, vocab, ANCHORS,
-SYSTEM_PROMPT) per [docs/DEPLOYING_A_NEW_SEARCH.md](docs/DEPLOYING_A_NEW_SEARCH.md).
+SYSTEM_PROMPT) per [docs/DEPLOYING_A_NEW_SEARCH.md](docs/DEPLOYING_A_NEW_SEARCH.md),
+run the pipeline, and finally `python scripts/build_filter_html.py` to
+get a self-contained `articles_filter.html` you browse, filter, and
+export from — the human-facing view of the labeled corpus.
 
 ## Read these three docs first
 
@@ -78,6 +81,8 @@ litsweep/
 │   ├── embed_filter.py        # local Ollama BGE-M3 + anchor cosine
 │   ├── embed_diagnostic.py    # post-embed coverage table per anchor
 │   ├── label_with_stanford.py # Stanford-gateway labeler with strict JSON
+│   ├── build_filter_html.py   # labeled corpus → self-contained faceted-filter HTML (the browse surface)
+│   ├── refresh_all_filters.py # central driver: rebuild sibling projects' filter HTML from one source
 │   ├── backfill_abstracts.py  # rebuild abstract column from raw/ JSONs
 │   ├── merge_gap_fill.py      # dedup-merge a sibling --output dir
 │   ├── disk_hygiene.py        # parquet-archive results/raw/ → archive/ (auto on --cleanup)
@@ -124,6 +129,12 @@ scripts/label_with_stanford.py  (strict-JSON 13-field schema;
         │
         ▼
 results/<slug>_labeled_corpus.csv  ← the deliverable
+        │
+        ▼
+scripts/build_filter_html.py  (facets derived from the data → zero-dependency static HTML)
+        │
+        ▼
+results/analysis/articles_filter.html  ← browse/filter/search/export; the human-facing surface
 ```
 
 See [docs/DEPLOYING_A_NEW_SEARCH.md](docs/DEPLOYING_A_NEW_SEARCH.md) for the full per-step checklist.
