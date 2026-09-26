@@ -657,7 +657,9 @@ def search_theses_fr(
 ) -> list[dict[str, Any]]:
     """Search theses.fr metadata API."""
     out: list[dict[str, Any]] = []
-    base = "https://theses.fr/api/v1/theses/recherche"
+    # Trailing slash is required: without it the API answers HTTP 200 with
+    # a {"status": "NOT_FOUND"} body, which silently parsed as zero hits.
+    base = "https://theses.fr/api/v1/theses/recherche/"
     for q in queries:
         params = {"q": q, "nombre": 100, "debut": 0}
         resp = _request_with_retry("GET", base, params=params)
@@ -672,6 +674,9 @@ def search_theses_fr(
             payload = resp.json()
         except json.JSONDecodeError as exc:
             cfg.log_error("theses_fr", q, f"json_decode={exc}")
+            continue
+        if isinstance(payload, dict) and payload.get("status") == "NOT_FOUND":
+            cfg.log_error("theses_fr", q, f"endpoint_not_found={payload.get('message')}")
             continue
         cfg.dump_raw("theses_fr", q, payload)
         results = (

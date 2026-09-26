@@ -134,6 +134,44 @@ def find_foundational_seed(spec: dict[str, str], cfg: api_clients.ClientConfig) 
     return best
 
 
+def seeds_from_csv(seeds_csv: Path, cfg: api_clients.ClientConfig) -> list[dict]:
+    """Resolve seed works listed in a CSV (e.g. a Zotero collection export).
+
+    Rows with a ``doi`` are fetched directly from OpenAlex; rows without
+    one fall back to a title search pinned by ``year``.
+
+    Args:
+        seeds_csv: CSV with at least ``title``; optional ``doi``, ``year``.
+        cfg: API client config (email used for the polite pool).
+
+    Returns:
+        OpenAlex work records for every seed that resolved.
+    """
+    df = pd.read_csv(seeds_csv, dtype=str).fillna("")
+    out: list[dict] = []
+    for _, row in df.iterrows():
+        doi = row.get("doi", "").strip()
+        rec = None
+        if doi:
+            resp = api_clients._request_with_retry(
+                "GET", f"{OPENALEX_BASE}/doi:{doi}", params={"mailto": cfg.email}
+            )
+            if resp is not None and resp.ok:
+                rec = resp.json()
+        if rec is None and row.get("title"):
+            rec = find_foundational_seed(
+                {"label": row["title"][:60], "search": row["title"],
+                 "year_hint": row.get("year", "")}, cfg,
+            )
+        if rec is None:
+            logger.warning("  seed unresolved: %s", row.get("title", "")[:80])
+            continue
+        out.append(rec)
+        time.sleep(0.1)
+    logger.info("resolved %d / %d seeds from %s", len(out), len(df), seeds_csv)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Forward chase: papers that cite the seed
 # ---------------------------------------------------------------------------
@@ -346,6 +384,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="Max forward-chase results per seed.")
     parser.add_argument("--email", default="ntlooker@gmail.com")
     parser.add_argument("--skip-foundational", action="store_true")
+    parser.add_argument("--seeds-csv", type=Path, action="append", default=[],
+                        help="CSV of extra seed works (title, doi, year), e.g. "
+                             "data/seeds/zotero_*.csv. Repeatable.")
     parser.add_argument("--skip-forward", action="store_true")
     parser.add_argument("--skip-backward", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -371,6 +412,9 @@ def main(argv: list[str] | None = None) -> int:
             rec = find_foundational_seed(spec, cfg)
             if rec is not None:
                 foundational_records.append(rec)
+
+    for seeds_csv in args.seeds_csv:
+        foundational_records.extend(seeds_from_csv(seeds_csv, cfg))
 
     foundational_ids = [r["id"] for r in foundational_records if r.get("id")]
 

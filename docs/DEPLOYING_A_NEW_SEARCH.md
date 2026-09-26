@@ -384,6 +384,25 @@ python scripts/embed_filter.py \
     --out results/<slug>_bibliography_embedded.csv
 ```
 
+### Citation chase from curated seeds
+
+`scripts/citation_chase.py` forward/backward-chases seeds via OpenAlex
+and merges new records into the bibliography. The scaffold ships
+`FOUNDATIONAL_SEEDS` from an older project — **replace them** with your
+topic's foundational works. To seed from a curated reading list (e.g. a
+Zotero collection exported to CSV with `title`, `doi`, `year`), pass
+`--seeds-csv` (repeatable); DOIs resolve directly, title-only rows fall
+back to title search:
+
+```bash
+python scripts/citation_chase.py --top-n 0 \
+    --seeds-csv data/seeds/zotero_<collection>.csv
+```
+
+Run it after harvest and before embedding (`--top-n 0` until a labeled
+corpus exists); avoid running it concurrently with a harvest — OpenAlex
+429s will drop seeds.
+
 ### Post-label cleanup — drop comments/replies + collapse duplicates
 
 The harvest-time `dedup.py` collapses obvious DOI/title duplicates, but
