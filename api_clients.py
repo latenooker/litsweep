@@ -25,6 +25,7 @@ partial failures.
 from __future__ import annotations
 
 import json
+import os
 import logging
 import time
 from dataclasses import dataclass, field
@@ -43,6 +44,25 @@ logger = logging.getLogger(__name__)
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 
+def _with_openalex_key(url: str, params: dict | None) -> dict | None:
+    """Attach ``OPENALEX_API_KEY`` (if set) to OpenAlex requests.
+
+    Since 2026 OpenAlex meters keyless requests against a small daily
+    budget shared per IP; a free key lifts that limit.
+
+    Args:
+        url: Request URL.
+        params: Query parameters (not mutated).
+
+    Returns:
+        Params with ``api_key`` added for api.openalex.org, else unchanged.
+    """
+    key = os.environ.get("OPENALEX_API_KEY", "")
+    if not key or "api.openalex.org" not in url:
+        return params
+    return {**(params or {}), "api_key": key}
+
+
 def _request_with_retry(
     method: str,
     url: str,
@@ -59,11 +79,20 @@ def _request_with_retry(
     all retries fail.
     """
     last_exc: Exception | None = None
+    params = _with_openalex_key(url, params)
     for attempt in range(max_retries + 1):
         try:
             resp = requests.request(
                 method, url, params=params, headers=headers, timeout=timeout
             )
+            if resp.status_code == 429 and "Insufficient budget" in resp.text:
+                # OpenAlex daily budget exhausted: retrying cannot help, and
+                # callers would otherwise record the query as zero hits.
+                logger.error(
+                    "%s %s -> 429 budget exhausted (set OPENALEX_API_KEY; "
+                    "resets midnight UTC)", method, url,
+                )
+                return resp
             if resp.status_code in _RETRYABLE_STATUS and attempt < max_retries:
                 wait = backoff_base ** attempt
                 logger.warning(

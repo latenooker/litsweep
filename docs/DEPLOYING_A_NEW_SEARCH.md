@@ -50,6 +50,10 @@ work and depend on your topic.
   - `WOS_API_KEY` — WoS Starter (free tier, 50/day).
   - `BASE_API_KEY` — global thesis aggregator (free).
   - `SEMANTIC_SCHOLAR_API_KEY` — optional (free, raises rate limit).
+  - `OPENALEX_API_KEY` — **strongly recommended** (free at openalex.org).
+    Keyless OpenAlex requests share a small daily budget per IP; one
+    harvest + citation chase exhausts it and later queries return 429
+    (logged as "budget exhausted").
 - **`rclone`** with a remote configured for backup
   (`rclone listremotes` should show your destination, e.g. `su-drive:`).
 - **Disk headroom** of ~2 GB per project for the embedding matrix
