@@ -102,7 +102,30 @@ FOUNDATIONAL_SEEDS: list[dict[str, str]] = [
 
 
 def find_foundational_seed(spec: dict[str, str], cfg: api_clients.ClientConfig) -> dict | None:
-    """Search OpenAlex for a foundational work; return the best match record."""
+    """Search OpenAlex for a foundational work; return the best match record.
+
+    With a ``"title"`` key, tries an exact ``title.search`` filter first:
+    the keyword ``search`` + year-proximity fallback below can silently
+    pick an unrelated paper from the same year (it did for 5/10 seeds in
+    humus-forms-social).
+    """
+    if spec.get("title"):
+        q = "".join(c if c.isalnum() or c.isspace() or c == "-" else " "
+                    for c in spec["title"])
+        resp = api_clients._request_with_retry(
+            "GET", OPENALEX_BASE,
+            params={"filter": f"title.search:{q}", "per_page": 5,
+                    "mailto": cfg.email},
+        )
+        hits = (resp.json().get("results") or []) if resp is not None and resp.ok else []
+        if hits:
+            best = max(hits, key=lambda r: r.get("cited_by_count") or 0)
+            logger.info("  %s → %s (%s) %s [title match]", spec["label"],
+                        best.get("display_name", "")[:80],
+                        best.get("publication_year"), best.get("id"))
+            return best
+        logger.warning("  no exact-title hit for %s; falling back to keyword search",
+                       spec["label"])
     params = {
         "search": spec["search"],
         "per_page": 25,
