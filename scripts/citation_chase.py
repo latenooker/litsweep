@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -287,6 +288,116 @@ def backward_chase(
 
 
 # ---------------------------------------------------------------------------
+# WoS Expanded backend (forward chase only)
+# ---------------------------------------------------------------------------
+
+WOS_BASE = "https://wos-api.clarivate.com/api/wos"
+
+
+def _wos_headers(cfg: api_clients.ClientConfig) -> dict[str, str]:
+    return {"X-ApiKey": cfg.wos_expanded_key, "Accept": "application/json"}
+
+
+def _wos_recs(payload: dict) -> list[dict]:
+    recs = api_clients._wos_exp_path(payload, "Data", "Records", "records", "REC") or []
+    if isinstance(recs, dict):
+        recs = [recs]
+    return recs if isinstance(recs, list) else []
+
+
+def wos_resolve_uid(
+    cfg: api_clients.ClientConfig,
+    doi: str = "",
+    title: str = "",
+    search: str = "",
+    year: str = "",
+) -> str | None:
+    """Find a seed's WoS UID by DOI, exact title, or keyword search.
+
+    Args:
+        cfg: Client config carrying ``wos_expanded_key``.
+        doi: DOI (tried first).
+        title: Exact title (``TI=``), tried if the DOI misses.
+        search: Keyword string (``TS=``, terms ANDed), last resort.
+        year: Optional publication year to pin title/keyword lookups.
+
+    Returns:
+        The best-matching UID (most cited), or None.
+    """
+    clean = lambda t: " ".join(  # noqa: E731 - WoS query-safe tokens
+        w for w in "".join(c if c.isalnum() or c.isspace() else " " for c in t).split()
+    )
+    queries: list[str] = []
+    if doi:
+        queries.append(f'DO=("{doi}")')
+    py = f" AND PY={year}" if year and year.isdigit() else ""
+    if title:
+        queries.append(f'TI=("{clean(title)}"){py}')
+        if py:  # year metadata often differs by one (online vs. print)
+            queries.append(f'TI=("{clean(title)}")')
+    if search:
+        queries.append("TS=(" + " AND ".join(clean(search).split()) + f"){py}")
+    for q in queries:
+        resp = api_clients._request_with_retry(
+            "GET", WOS_BASE, headers=_wos_headers(cfg),
+            params={"databaseId": "WOS", "usrQuery": q, "count": 5, "firstRecord": 1},
+        )
+        time.sleep(1.1)
+        if resp is None or not resp.ok:
+            continue
+        recs = _wos_recs(resp.json())
+        if recs:
+            best = max(recs, key=lambda r: api_clients._wos_exp_citations(r) or 0)
+            return best.get("UID")
+    return None
+
+
+def wos_forward_chase(
+    uids: list[str], cfg: api_clients.ClientConfig, cap_per_seed: int = 500
+) -> list[dict]:
+    """Fetch records citing each WoS UID via the Expanded ``/citing`` endpoint.
+
+    Args:
+        uids: Seed WoS UIDs.
+        cfg: Client config carrying ``wos_expanded_key``.
+        cap_per_seed: Max citing records fetched per seed.
+
+    Returns:
+        Parsed records (``source_database == "wos_expanded"``), deduped by UID.
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    for uid in uids:
+        first, fetched, total = 1, 0, None
+        while fetched < cap_per_seed:
+            want = min(100, cap_per_seed - fetched)
+            resp = api_clients._request_with_retry(
+                "GET", f"{WOS_BASE}/citing", headers=_wos_headers(cfg),
+                params={"databaseId": "WOS", "uniqueId": uid,
+                        "count": want, "firstRecord": first},
+            )
+            time.sleep(1.1)  # 1 req/sec throttle
+            if resp is None or not resp.ok:
+                cfg.log_error("citation_chase_wos", uid,
+                              f"status={getattr(resp, 'status_code', 'NA')}")
+                break
+            payload = resp.json()
+            if total is None:
+                total = (payload.get("QueryResult") or {}).get("RecordsFound")
+            recs = _wos_recs(payload)
+            for rec in recs:
+                if rec.get("UID") not in seen:
+                    seen.add(rec.get("UID"))
+                    out.append(api_clients._wos_expanded_record(rec))
+            fetched += len(recs)
+            if len(recs) < want or (total is not None and fetched >= total):
+                break
+            first += len(recs)
+        logger.info("  wos forward(%s): collected %d of %s", uid, fetched, total)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Auto seeds
 # ---------------------------------------------------------------------------
 
@@ -370,6 +481,41 @@ def merge_into_bibliography(
 # ---------------------------------------------------------------------------
 
 
+def _main_wos(args: argparse.Namespace, cfg: api_clients.ClientConfig) -> int:
+    """Forward chase through WoS Expanded (no OpenAlex calls)."""
+    if not cfg.wos_expanded_key:
+        raise SystemExit("--backend wos needs WOS_EXPANDED_API_KEY")
+    uids: list[str] = []
+    if not args.skip_foundational:
+        for spec in FOUNDATIONAL_SEEDS:
+            uid = wos_resolve_uid(cfg, title=spec.get("title", ""), search=spec["search"],
+                                  year=spec.get("year_hint", ""))
+            logger.info("  %s -> %s", spec["label"], uid)
+            if uid:
+                uids.append(uid)
+    for seeds_csv in args.seeds_csv:
+        df = pd.read_csv(seeds_csv, dtype=str).fillna("")
+        n0 = len(uids)
+        for _, row in df.iterrows():
+            uid = wos_resolve_uid(cfg, doi=row.get("doi", ""),
+                                  title=row.get("title", ""),
+                                  year=row.get("year", ""))
+            if uid:
+                uids.append(uid)
+            else:
+                logger.warning("  seed not in WoS: %s", row.get("title", "")[:80])
+        logger.info("resolved %d / %d seeds from %s", len(uids) - n0, len(df), seeds_csv)
+    uids = list(dict.fromkeys(uids))
+    logger.info("wos seed total: %d unique", len(uids))
+    records = wos_forward_chase(uids, cfg, cap_per_seed=args.cap_per_seed)
+    logger.info("wos forward chase total: %d records", len(records))
+    n = merge_into_bibliography(
+        records, args.bib_csv, args.bib_bib, "wos_expanded|citation_chase_forward"
+    )
+    logger.info("appended %d wos forward-chase records", n)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--labeled", type=Path,
@@ -383,6 +529,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cap-per-seed", type=int, default=500,
                         help="Max forward-chase results per seed.")
     parser.add_argument("--email", default="ntlooker@gmail.com")
+    parser.add_argument(
+        "--backend", choices=("openalex", "wos"), default="openalex",
+        help="Citation index for the chase. 'wos' uses WoS Expanded /citing "
+             "(needs WOS_EXPANDED_API_KEY; forward chase only, no auto seeds).",
+    )
     parser.add_argument("--skip-foundational", action="store_true")
     parser.add_argument("--seeds-csv", type=Path, action="append", default=[],
                         help="CSV of extra seed works (title, doi, year), e.g. "
@@ -401,8 +552,12 @@ def main(argv: list[str] | None = None) -> int:
         email=args.email,
         raw_dir=args.bib_csv.parent / "raw",
         error_log=args.bib_csv.parent / "errors.log",
+        wos_expanded_key=os.environ.get("WOS_EXPANDED_API_KEY"),
     )
     cfg.raw_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.backend == "wos":
+        return _main_wos(args, cfg)
 
     # 1) Foundational seeds
     foundational_records: list[dict] = []

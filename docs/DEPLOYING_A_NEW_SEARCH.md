@@ -403,6 +403,12 @@ python scripts/citation_chase.py --top-n 0 \
     --seeds-csv data/seeds/zotero_<collection>.csv
 ```
 
+With `WOS_EXPANDED_API_KEY` set, `--backend wos` runs the forward chase
+through WoS Expanded's `/citing` endpoint instead (no OpenAlex calls;
+seeds resolve by DOI, then exact title, then keywords — give
+`FOUNDATIONAL_SEEDS` a `"title"` key for reliable matching). Backward
+chase is OpenAlex-only.
+
 Run it after harvest and before embedding (`--top-n 0` until a labeled
 corpus exists); avoid running it concurrently with a harvest — OpenAlex
 429s will drop seeds.
