@@ -89,6 +89,7 @@ per `DISK_HYGIENE.md`); if it's gone, accept the partial recovery.
 | **EarthArXiv source** | `api_clients.py` :: `search_eartharxiv` | Earth-science preprints (via Crossref `prefix:10.31223`) |
 | **Crossref source (broad)** | `api_clients.py` :: `search_crossref` | Journal-hosted papers with DOIs that OpenAlex undersamples (JSTOR, Cambridge, regional repositories) |
 | **CORE.ac.uk source** | `api_clients.py` :: `search_core` | University institutional repositories — academia.edu / dspace / regional grey literature |
+| **arXiv source** (2026-09-29) | `api_clients.py` :: `search_arxiv`; `ARXIV` list in `queries.py`; `"arxiv"` in `SOURCE_QUERIES` / `DEFAULT_SOURCES` | CS / stats / physics preprints; OpenAlex indexes arXiv late, so fast-moving methods topics (self-supervised vision, foundation models) are under-sampled without it |
 | Defaults rebalanced | `litsweep_search.py` | Drop `wos` (Starter) and `base` from `DEFAULT_SOURCES`; add scielo / europepmc / eartharxiv / crossref / core |
 
 ## Per-project decision: do you back-port?
@@ -219,6 +220,23 @@ python scripts/label_with_stanford.py \
   `CORE_API_KEY` in your shell for a higher quota.
 - High recall, lower precision than the publisher-curated sources;
   the LLM scope check carries the load.
+
+### arXiv
+- Atom API at `export.arxiv.org/api/query`, no key. Terms of use ask for
+  one request per 3 s; the client sleeps `delay_s=3.0` between pages, so
+  8 queries × 500 cap ≈ 40 requests ≈ 2 min.
+- Queries use arXiv syntax (`ti:`, `abs:`, `all:`, `cat:`, `AND`/`OR`/
+  `ANDNOT`, quoted phrases), not OpenAlex prose. Bare words search all
+  fields and are noisy; prefer `abs:`.
+- DOI is the journal DOI when the preprint has one, else the DataCite
+  `10.48550/arXiv.<id>` that OpenAlex also uses, so dedup merges.
+- The API occasionally returns an empty page mid-result-set; the client
+  retries that page once.
+- Back-port: copy `api_clients.py` (if it is otherwise unchanged from
+  upstream), add the two `"arxiv"` lines to the project's
+  `<slug>_search.py`, add an `ARXIV` list to `queries.py`, then run
+  `--sources arxiv --output results/gapfills/arxiv_<date>` and
+  `scripts/merge_gap_fill.py`.
 
 ## After back-porting: housekeeping
 

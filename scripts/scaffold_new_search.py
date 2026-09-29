@@ -561,6 +561,17 @@ CROSSREF: list[str] = [
 CORE: list[str] = [
     # TODO: 4-8 English keyword strings.
 ]
+
+# ---------------------------------------------------------------------------
+# arXiv — CS / stats / physics preprints (Atom API, no key; 3 s between
+# requests). arXiv syntax: ti:/abs:/all:/cat: prefixes, AND/OR/ANDNOT,
+# quoted phrases, e.g. 'abs:soil AND abs:"self-supervised"'. Leave empty
+# for topics with no arXiv literature.
+# ---------------------------------------------------------------------------
+
+ARXIV: list[str] = [
+    # TODO (optional): 0-8 arXiv search_query strings.
+]
 '''
     (target / "queries.py").write_text(content, encoding="utf-8")
 

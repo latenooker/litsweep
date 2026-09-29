@@ -1,7 +1,7 @@
 # litsweep
 
 Canonical scaffold for multilingual literature-search projects:
-harvest from up to 13 bibliographic databases → DOI/Jaccard dedup →
+harvest from up to 14 bibliographic databases → DOI/Jaccard dedup →
 local Ollama BGE-M3 embedding + per-anchor cosine filtering →
 strict-JSON LLM labeling (Stanford gateway *or* local Ollama).
 

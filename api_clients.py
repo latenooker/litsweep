@@ -1317,6 +1317,147 @@ def search_core(
 
 
 # ---------------------------------------------------------------------------
+# arXiv — CS / stats / physics preprints (Atom API, no key). OpenAlex
+# indexes arXiv late and incompletely, so this matters for fast-moving
+# methods topics (e.g. self-supervised vision).
+# ---------------------------------------------------------------------------
+
+_ARXIV_NS = {
+    "a": "http://www.w3.org/2005/Atom",
+    "arxiv": "http://arxiv.org/schemas/atom",
+    "os": "http://a9.com/-/spec/opensearch/1.1/",
+}
+
+
+def _arxiv_author(name: str) -> str:
+    """Convert arXiv's "First Last" to the pipeline's "Last, First"."""
+    parts = name.strip().rsplit(" ", 1)
+    return f"{parts[1]}, {parts[0]}" if len(parts) == 2 else name.strip()
+
+
+def _parse_arxiv_feed(xml_text: str) -> tuple[int, list[dict[str, Any]]]:
+    """Parse one arXiv Atom page into (total_results, normalized records).
+
+    Args:
+        xml_text: Atom XML returned by ``export.arxiv.org/api/query``.
+
+    Returns:
+        The feed's ``opensearch:totalResults`` and the page's records.
+        The DOI is the journal DOI when the preprint has been published,
+        else the arXiv DataCite DOI (``10.48550/arXiv.<id>``), which is
+        how OpenAlex stores preprints, so dedup merges both cases.
+    """
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(xml_text)
+    total = int(root.findtext("os:totalResults", "0", _ARXIV_NS) or 0)
+    out: list[dict[str, Any]] = []
+    for e in root.findall("a:entry", _ARXIV_NS):
+        abs_url = (e.findtext("a:id", "", _ARXIV_NS) or "").strip()
+        if "/abs/" not in abs_url:  # error entries carry an api/errors id
+            continue
+        aid = abs_url.split("/abs/")[-1]
+        head, _, ver = aid.rpartition("v")
+        if head and ver.isdigit():
+            aid = head
+        journal_doi = (e.findtext("arxiv:doi", "", _ARXIV_NS) or "").strip()
+        published = e.findtext("a:published", "", _ARXIV_NS) or ""
+        pdf = next((link.get("href") for link in e.findall("a:link", _ARXIV_NS)
+                    if link.get("title") == "pdf"), None)
+        cat = e.find("arxiv:primary_category", _ARXIV_NS)
+        out.append({
+            "id": f"arxiv:{aid}",
+            "doi": journal_doi or f"10.48550/arXiv.{aid}",
+            "title": " ".join((e.findtext("a:title", "", _ARXIV_NS) or "").split()),
+            "publication_year": int(published[:4]) if published[:4].isdigit() else None,
+            "language": "en",
+            "type": "preprint",
+            "abstract": " ".join((e.findtext("a:summary", "", _ARXIV_NS) or "").split()) or None,
+            "authors": "; ".join(
+                _arxiv_author(a.findtext("a:name", "", _ARXIV_NS) or "")
+                for a in e.findall("a:author", _ARXIV_NS)
+            ),
+            "source_journal_or_publisher":
+                (e.findtext("arxiv:journal_ref", "", _ARXIV_NS) or "").strip() or "arXiv",
+            "cited_by_count": None,
+            "open_access_url": pdf or abs_url,
+            "raw": json.dumps({
+                "arxiv_id": aid,
+                "primary_category": cat.get("term") if cat is not None else None,
+                "published": published,
+                "updated": e.findtext("a:updated", "", _ARXIV_NS),
+            }),
+            "source_database": "arxiv",
+        })
+    return total, out
+
+
+def search_arxiv(
+    queries: Iterable[str],
+    cfg: ClientConfig,
+    *,
+    page_size: int = 100,
+    delay_s: float = 3.0,
+) -> list[dict[str, Any]]:
+    """Search arXiv via its Atom API, paginating up to ``cfg.per_query_cap``.
+
+    Queries use arXiv search syntax: field prefixes ``ti:``, ``abs:``,
+    ``all:``, ``cat:`` with ``AND``/``OR``/``ANDNOT`` and quoted phrases,
+    e.g. ``abs:soil AND abs:"self-supervised"``. Results are sorted by
+    relevance. arXiv's terms of use ask for one request every 3 s, so
+    ``delay_s`` defaults to 3.0. The API sometimes returns an empty page
+    mid-result-set; that page is retried once before giving up.
+
+    Args:
+        queries: arXiv search_query strings.
+        cfg: Shared client configuration.
+        page_size: Results per request (arXiv allows up to 2000; 100 is
+            gentler).
+        delay_s: Pause between requests, in seconds.
+
+    Returns:
+        Normalized records (see module docstring).
+    """
+    out: list[dict[str, Any]] = []
+    base = "https://export.arxiv.org/api/query"
+    headers = {"User-Agent": f"litsweep/0.1 (mailto:{cfg.email}; research literature search)"}
+    for q in queries:
+        start, page, retried = 0, 0, False
+        while start < cfg.per_query_cap:
+            params = {
+                "search_query": q,
+                "start": start,
+                "max_results": min(page_size, cfg.per_query_cap - start),
+                "sortBy": "relevance",
+            }
+            resp = _request_with_retry("GET", base, params=params, headers=headers,
+                                       timeout=60.0)
+            time.sleep(delay_s)
+            if resp is None or not resp.ok:
+                cfg.log_error("arxiv", q, f"status={getattr(resp, 'status_code', 'NA')}")
+                break
+            try:
+                total, records = _parse_arxiv_feed(resp.text)
+            except Exception as exc:  # malformed XML
+                cfg.log_error("arxiv", q, f"xml={exc}")
+                break
+            cfg.dump_raw("arxiv", f"{q}__p{page}", {"query": q, "start": start,
+                                                    "xml": resp.text})
+            if not records:
+                if start < total and not retried:
+                    retried = True
+                    continue
+                break
+            retried = False
+            out.extend(records)
+            start += len(records)
+            page += 1
+            if start >= total:
+                break
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Dispatch table
 # ---------------------------------------------------------------------------
 
@@ -1336,4 +1477,5 @@ CLIENTS: dict[str, SearchFn] = {
     "eartharxiv": search_eartharxiv,
     "crossref": search_crossref,
     "core": search_core,
+    "arxiv": search_arxiv,
 }

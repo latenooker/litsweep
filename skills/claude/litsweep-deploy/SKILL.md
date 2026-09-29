@@ -7,7 +7,7 @@ allowed-tools: Bash, Read, Write, Edit, AskUserQuestion
 # litsweep-deploy
 
 Drive a colleague from a litsweep checkout to a first labeled corpus on
-their own topic. litsweep harvests up to 13 bibliographic databases,
+their own topic. litsweep harvests up to 14 bibliographic databases,
 dedups, embeds locally with Ollama BGE-M3, and labels with an LLM
 (Stanford gateway or local Ollama).
 

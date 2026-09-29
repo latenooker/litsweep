@@ -44,6 +44,7 @@ SOURCE_QUERIES: dict[str, list[str]] = {
     "eartharxiv": getattr(Q, "EARTHARXIV", []),
     "crossref": getattr(Q, "CROSSREF", []),
     "core": getattr(Q, "CORE", []),
+    "arxiv": getattr(Q, "ARXIV", []),
 }
 
 # Defaults exclude the Starter-tier WoS endpoint (wos) and BASE because both
@@ -53,7 +54,7 @@ SOURCE_QUERIES: dict[str, list[str]] = {
 DEFAULT_SOURCES: tuple[str, ...] = (
     "openalex", "semantic_scholar", "wos_expanded",
     "hal", "theses_fr", "bdtd", "scielo",
-    "europepmc", "eartharxiv", "crossref", "core",
+    "europepmc", "eartharxiv", "crossref", "core", "arxiv",
 )
 
 

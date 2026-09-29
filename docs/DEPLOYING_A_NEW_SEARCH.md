@@ -158,6 +158,10 @@ Six to eight constants the orchestrator dispatches by source. Conventions:
   Identical between Starter and Expanded; alias the lists.
 - `HAL` / `THESES_FR` — Solr / keyword grammars.
 - `BASE` / `BDTD` — keyword strings.
+- (Optional) `ARXIV` — arXiv `search_query` syntax (`abs:`, `ti:`,
+  `cat:`, `AND`/`OR`, quoted phrases). Worth filling for methods-heavy
+  topics (ML, remote sensing, statistics); leave empty otherwise.
+  3 s between requests, so keep it to about 8 queries.
 
 Time investment: half a day to a couple of days, dominated by
 domain-vocabulary research. Look at top-cited papers in your topic
