@@ -22,7 +22,7 @@ Ctrl-C costs at most one chunk. Re-running the same command resumes.
 
 Backend: selected with ``--label-backend`` (default ``stanford``).
 The ``stanford`` backend needs ``STANFORD_API_KEY`` and defaults to
-model ``gemini-2.0-flash-lite-001`` at ``https://aiapi-prod.stanford.edu/v1``;
+model ``gemini-2.5-flash-lite`` at ``https://aiapi-prod.stanford.edu/v1``;
 the ``ollama`` backend needs a local Ollama daemon with the chat model
 pulled (e.g. ``ollama pull llama3.1``).
 
@@ -61,7 +61,7 @@ import label_backends  # noqa: E402
 logger = logging.getLogger("label_with_stanford")
 
 STANFORD_DEFAULT_URL = "https://aiapi-prod.stanford.edu/v1"
-STANFORD_DEFAULT_MODEL = "gemini-2.0-flash-lite-001"
+STANFORD_DEFAULT_MODEL = "gemini-2.5-flash-lite"
 OLLAMA_DEFAULT_HOST = "http://localhost:11434"
 OLLAMA_DEFAULT_MODEL = "llama3.1:8b-instruct-q4_K_M"
 

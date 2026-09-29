@@ -65,7 +65,7 @@ class StanfordBackend:
     Attributes:
         api_key: Required. Pass ``STANFORD_API_KEY`` here.
         api_url: Base URL; default Stanford prod.
-        model: Model id; default ``gemini-2.0-flash-lite-001``.
+        model: Model id; default ``gemini-2.5-flash-lite``.
         temperature: Sampling temperature forwarded to the endpoint.
         max_tokens: Max completion tokens forwarded to the endpoint.
         min_interval_s: Minimum wall-clock seconds between calls (>0 to
@@ -74,7 +74,7 @@ class StanfordBackend:
 
     api_key: str
     api_url: str = "https://aiapi-prod.stanford.edu/v1"
-    model: str = "gemini-2.0-flash-lite-001"
+    model: str = "gemini-2.5-flash-lite"
     temperature: float = 0.0
     max_tokens: int = 400
     min_interval_s: float = 0.0
