@@ -1,4 +1,10 @@
-"""Deduplication: DOI exact match + Jaccard title similarity."""
+"""Deduplication: DOI exact match + Jaccard title similarity.
+
+Known gaps (flagged 2026-09-29, not yet fixed): language-bucket mismatch
+("en" vs "English" vs None), the short-title gate blocking exact
+matches, no source-ID key, hyphenation-sensitive tokens. See
+docs/DEDUP_REFINEMENTS.md.
+"""
 
 from __future__ import annotations
 

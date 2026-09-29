@@ -45,7 +45,7 @@ worm-tea-lit, future ones) start from a consistent base.
 |---|---|
 | `litsweep_search.py` | Orchestrator logic changes (harvest, dedup, augment, write). Avoid topic-specific edits. |
 | `api_clients.py` | New API source, defensive parser, rate-limit fix. |
-| `dedup.py` | Rare; only if dedup heuristics need tuning. |
+| `dedup.py` | Rare; only if dedup heuristics need tuning. Open refinements are listed in `docs/DEDUP_REFINEMENTS.md`. |
 | `scripts/scaffold_new_search.py` | Scaffold steps, stub content, TEMPLATED_FILES. |
 | `scripts/embed_filter.py` | BGE-M3 / Ollama protocol, score calculation. ANCHORS get *replaced* per project. |
 | `scripts/label_with_stanford.py` | Stanford gateway protocol, prompt assembly, schema. SYSTEM_PROMPT and `_error_label` schema get *replaced* per project. |
