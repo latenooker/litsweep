@@ -97,6 +97,16 @@ BUILDS: tuple[Build, ...] = (
         csv=("char14c/results/char14c_labeled_corpus.csv",),
     ),
     Build(
+        # and-ext-lit lives on the external drive (absolute paths pass through
+        # the workspace join unchanged).
+        name="andext-dust-soilmag",
+        out="/Volumes/Untitled/projects/and-ext-lit/results/analysis/articles_filter_andext_dust_soilmag.html",
+        title="Andic extent, dust/loess and soil-magnetism literature (3 corpora)",
+        csv=("/Volumes/Untitled/projects/and-ext-lit/results/and_ext_lit_labeled_corpus.csv",
+             "dust-loess-lit/results/dust_loess_lit_labeled_corpus_dedup.csv",
+             "soilmag/results/soilmag_lit_labeled_corpus.csv"),
+    ),
+    Build(
         name="pparadox",
         out="pparadox-lit/results/articles_filter.html",
         title="Particle-paradox literature (4 corpora)",
