@@ -107,6 +107,12 @@ BUILDS: tuple[Build, ...] = (
              "soilmag/results/soilmag_lit_labeled_corpus.csv"),
     ),
     Build(
+        name="volcweath",
+        out="/Volumes/Untitled/projects/volcweath-lit/results/analysis/articles_filter.html",
+        title="Volcanic weathering rates by composition (and-ext gap search)",
+        csv=("/Volumes/Untitled/projects/volcweath-lit/results/volcweath_lit_labeled_corpus.csv",),
+    ),
+    Build(
         name="pparadox",
         out="pparadox-lit/results/articles_filter.html",
         title="Particle-paradox literature (4 corpora)",
