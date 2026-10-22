@@ -40,6 +40,7 @@ SOURCE_QUERIES: dict[str, list[str]] = {
     "base": Q.BASE,
     "bdtd": Q.BDTD,
     "scielo": getattr(Q, "SCIELO", []),
+    "lareferencia": getattr(Q, "LAREFERENCIA", []),
     "europepmc": getattr(Q, "EUROPEPMC", []),
     "eartharxiv": getattr(Q, "EARTHARXIV", []),
     "crossref": getattr(Q, "CROSSREF", []),
@@ -53,7 +54,7 @@ SOURCE_QUERIES: dict[str, list[str]] = {
 # still opt in via --sources wos,base if desired.
 DEFAULT_SOURCES: tuple[str, ...] = (
     "openalex", "semantic_scholar", "wos_expanded",
-    "hal", "theses_fr", "bdtd", "scielo",
+    "hal", "theses_fr", "bdtd", "scielo", "lareferencia",
     "europepmc", "eartharxiv", "crossref", "core", "arxiv",
 )
 

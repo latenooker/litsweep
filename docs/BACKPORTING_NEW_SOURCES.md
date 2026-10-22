@@ -90,6 +90,7 @@ per `DISK_HYGIENE.md`); if it's gone, accept the partial recovery.
 | **Crossref source (broad)** | `api_clients.py` :: `search_crossref` | Journal-hosted papers with DOIs that OpenAlex undersamples (JSTOR, Cambridge, regional repositories) |
 | **CORE.ac.uk source** | `api_clients.py` :: `search_core` | University institutional repositories — academia.edu / dspace / regional grey literature |
 | **arXiv source** (2026-09-29) | `api_clients.py` :: `search_arxiv`; `ARXIV` list in `queries.py`; `"arxiv"` in `SOURCE_QUERIES` / `DEFAULT_SOURCES` | CS / stats / physics preprints; OpenAlex indexes arXiv late, so fast-moving methods topics (self-supervised vision, foundation models) are under-sampled without it |
+| **LA Referencia source** (2026-10-22) | `api_clients.py` :: `search_lareferencia`; `LAREFERENCIA` list in `queries.py`; `"lareferencia"` in `SOURCE_QUERIES` / `DEFAULT_SOURCES` | Latin American theses (master's / doctoral / bachelor's) from the national open-access repository networks; no key. BDTD covers Brazil only |
 | Defaults rebalanced | `litsweep_search.py` | Drop `wos` (Starter) and `base` from `DEFAULT_SOURCES`; add scielo / europepmc / eartharxiv / crossref / core |
 
 ## Per-project decision: do you back-port?
@@ -189,6 +190,15 @@ python scripts/label_with_stanford.py \
 - The site's search uses AND-of-tokens; **2–3 token queries** work,
   4+ token compound queries return zero. Expand vocabulary by writing
   more 2-token combinations, not by stacking tokens.
+
+### LA Referencia
+- Thesis formats only (`masterThesis`, `doctoralThesis`, `bachelorThesis`);
+  the Spain and Portugal networks are excluded. Abstracts are usually
+  present (VuFind `summary`), so title-only gating is less of an issue
+  than for SciELO.
+- VuFind AllFields search: short Spanish / Portuguese strings (2-4 words)
+  work; up to `max_pages` x 100 records per query (default 500).
+- Brazilian theses overlap BDTD; dedup handles exact-title matches.
 
 ### Europe PMC
 - Default mode (`only_preprints=True`) filters to `SRC:PPR` to avoid

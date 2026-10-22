@@ -520,6 +520,16 @@ SCIELO: list[str] = [
 ]
 
 # ---------------------------------------------------------------------------
+# LA Referencia — Latin American open-access repository networks (theses
+# only; Spain / Portugal networks excluded). VuFind keyword search, no key.
+# Short Spanish / Portuguese strings; up to 500 records per query.
+# ---------------------------------------------------------------------------
+
+LAREFERENCIA: list[str] = [
+    # TODO: 6-20 short Spanish / Portuguese keyword strings (thesis titles).
+]
+
+# ---------------------------------------------------------------------------
 # Europe PMC — covers PubMed/MEDLINE/PMC plus preprints (bioRxiv,
 # medRxiv, Research Square, SSRN, ESSOAr) under SRC:PPR. The default
 # orchestrator wiring filters to preprints only to avoid re-pulling

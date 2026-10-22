@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1458,6 +1459,122 @@ def search_arxiv(
 
 
 # ---------------------------------------------------------------------------
+# LA Referencia — Latin American open-access repositories (VuFind REST API)
+# ---------------------------------------------------------------------------
+
+_LAREFERENCIA_API = "https://buscador.lareferencia.info/api/v1/search"
+_LAREFERENCIA_FIELDS = ("id", "title", "authors", "summary", "publicationDates", "formats", "languages",
+                        "urls", "subjects")
+_LAREFERENCIA_THESIS_FORMATS = ("masterThesis", "doctoralThesis", "bachelorThesis")
+_LAREFERENCIA_COUNTRY: dict[str, str] = {
+    "AR": "Argentina", "BO": "Bolivia", "BR": "Brasil", "CL": "Chile", "CO": "Colombia", "CR": "Costa Rica",
+    "EC": "Ecuador", "SV": "El Salvador", "GT": "Guatemala", "HN": "Honduras", "MX": "México",
+    "NI": "Nicaragua", "PA": "Panamá", "PE": "Perú", "PY": "Paraguay", "UY": "Uruguay", "VE": "Venezuela",
+}
+_LAREFERENCIA_LANG = {"spa": "es", "por": "pt", "eng": "en"}
+_DOI_IN_URL = re.compile(r"(10\.\d{4,9}/[^\s|?#]+)")
+
+
+def _lareferencia_names(block: Any) -> list[str]:
+    """Author names from a VuFind authors sub-block (dict keyed by name, or list of str / dict)."""
+    if isinstance(block, dict):
+        return [str(k) for k in block]
+    if isinstance(block, list):
+        return [str(i.get("name", "")) if isinstance(i, dict) else str(i) for i in block]
+    return []
+
+
+def _lareferencia_record(r: dict) -> dict[str, Any] | None:
+    """Normalise one LA Referencia VuFind record to the shared record schema.
+
+    Args:
+        r: One element of the API's ``records`` list.
+
+    Returns:
+        Record dict, or None if the record has no id or title.
+    """
+    rid, title = r.get("id"), (r.get("title") or "").strip()
+    if not rid or not title:
+        return None
+    authors = r.get("authors") or {}
+    names = _lareferencia_names(authors.get("primary")) + _lareferencia_names(authors.get("secondary"))
+    urls = [u.get("url") for u in r.get("urls") or [] if isinstance(u, dict) and u.get("url")]
+    doi = next((m for u in urls for m in [_DOI_IN_URL.search(u)] if m), None)
+    year_txt = str((r.get("publicationDates") or [""])[0])[:4]
+    langs = r.get("languages") or []
+    country = _LAREFERENCIA_COUNTRY.get(str(rid).split("_")[0], str(rid).split("_")[0])
+    return {
+        "id": f"lareferencia:{rid}",
+        "doi": doi.group(1) if doi else None,
+        "title": title,
+        "publication_year": int(year_txt) if year_txt.isdigit() else None,
+        "language": _LAREFERENCIA_LANG.get(langs[0], langs[0]) if langs else None,
+        "type": "thesis (" + ", ".join(r.get("formats") or []) + ")",
+        "abstract": " ".join(r.get("summary") or []) or None,
+        "authors": "; ".join(n for n in names if n),
+        "source_journal_or_publisher": f"LA Referencia ({country})",
+        "cited_by_count": None,
+        "open_access_url": urls[0] if urls else None,
+        "raw": json.dumps(r, ensure_ascii=False)[:5000],
+        "source_database": "lareferencia",
+    }
+
+
+
+def search_lareferencia(
+    queries: Iterable[str],
+    cfg: ClientConfig,
+    *,
+    max_pages: int = 5,
+    page_size: int = 100,
+    delay_s: float = 0.5,
+) -> list[dict[str, Any]]:
+    """Search LA Referencia for Latin American theses (no API key).
+
+    LA Referencia aggregates the national open-access repository networks of
+    Latin America. Results are restricted to master's, doctoral and
+    bachelor's theses, and the Spain and Portugal networks are excluded (they
+    duplicate HAL / national European sources). Short Spanish / Portuguese
+    keyword strings work best.
+
+    Args:
+        queries: Keyword strings (VuFind AllFields search).
+        cfg: Client configuration (raw dumps, error log).
+        max_pages: Maximum result pages per query.
+        page_size: Records per page (API maximum 100).
+        delay_s: Pause between requests.
+
+    Returns:
+        Normalised records.
+    """
+    out: list[dict[str, Any]] = []
+    for q in queries:
+        for page in range(1, max_pages + 1):
+            params: list[tuple[str, str]] = [
+                ("lookfor", q), ("type", "AllFields"), ("limit", str(page_size)), ("page", str(page)),
+                ("filter[]", '-network_name_str:"España"'), ("filter[]", '-network_name_str:"Portugal"'),
+            ]
+            params += [("filter[]", f'~format:"{f}"') for f in _LAREFERENCIA_THESIS_FORMATS]
+            params += [("field[]", f) for f in _LAREFERENCIA_FIELDS]
+            resp = _request_with_retry("GET", _LAREFERENCIA_API, params=params, timeout=60)  # type: ignore[arg-type]
+            if resp is None or not resp.ok:
+                cfg.log_error("lareferencia", q, f"page={page} status={getattr(resp, 'status_code', 'NA')}")
+                break
+            try:
+                data = resp.json()
+            except ValueError:
+                cfg.log_error("lareferencia", q, f"page={page} non-JSON response")
+                break
+            cfg.dump_raw("lareferencia", f"{q} p{page}", data)
+            recs = data.get("records") or []
+            out.extend(rec for rec in map(_lareferencia_record, recs) if rec)
+            time.sleep(delay_s)
+            if not recs or page * page_size >= int(data.get("resultCount") or 0):
+                break
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Dispatch table
 # ---------------------------------------------------------------------------
 
@@ -1473,6 +1590,7 @@ CLIENTS: dict[str, SearchFn] = {
     "base": search_base,
     "bdtd": search_bdtd,
     "scielo": search_scielo,
+    "lareferencia": search_lareferencia,
     "europepmc": search_europepmc,
     "eartharxiv": search_eartharxiv,
     "crossref": search_crossref,
